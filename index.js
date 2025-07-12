@@ -27,7 +27,11 @@ async function run() {
     try {
         // Connect the client to the server	(optional starting in v4.7)
         await client.connect();
+
         const usersCollection = client.db("studysphere").collection("users");
+        const sessionsCollection = client.db("studysphere").collection("sessions");
+        const reviewsCollection = client.db("studysphere").collection("reviews");
+
 
 
         // step 1: users data receive 
@@ -113,6 +117,194 @@ async function run() {
 
             res.send(result);
         });
+
+
+        // ****************Study Session related APIs************
+        // ****************Study Session related APIs************
+        // ****************Study Session related APIs************
+        // ****************Study Session related APIs************
+
+
+        // to get all session in an array
+
+        app.get('/sessions/all', async (req, res) => {
+            const allSessions = await sessionsCollection.find().toArray();
+            res.send(allSessions)
+        })
+
+        // GET /sessions?tutorEmail=example@example.com
+        app.get('/sessions', async (req, res) => {
+            try {
+                const { tutorEmail } = req.query;
+
+                if (!tutorEmail) {
+                    return res.status(400).json({ error: 'tutorEmail query param is required' });
+                }
+
+                const sessions = await sessionsCollection
+                    .find({ tutorEmail })
+                    .sort({ createdAt: -1 }) // optional: latest first
+                    .toArray();
+
+                res.status(200).json(sessions);
+            } catch (error) {
+                console.error('Error fetching tutor sessions:', error);
+                res.status(500).json({ error: 'Internal server error' });
+            }
+        });
+
+
+        // get only 6 card of study session usning limit and filtering
+
+        app.get('/sessions/home', async (req, res) => {
+            try {
+                const sessions = await sessionsCollection
+                    .find({ status: 'approved' })
+                    .sort({ createdAt: -1 }) // latest first
+                    .limit(6)
+                    .toArray();
+
+                res.status(200).json(sessions);
+            } catch (error) {
+                console.error('Failed to fetch sessions:', error);
+                res.status(500).json({ message: 'Internal server error' });
+            }
+        });
+
+
+
+        // Re apply for rejected applicatons in tutor dashborad
+
+        app.patch('/sessions/reapply/:id', async (req, res) => {
+            const { id } = req.params;
+
+            try {
+                const filter = { _id: new ObjectId(id), status: 'rejected' };
+                const update = { $set: { status: 'pending' } };
+
+                const result = await sessionsCollection.updateOne(filter, update);
+
+                if (result.modifiedCount > 0) {
+                    res.status(200).json({ modifiedCount: result.modifiedCount });
+                } else {
+                    res.status(404).json({ message: 'Session not found or not rejected' });
+                }
+            } catch (error) {
+                console.error('Reapply request failed:', error);
+                res.status(500).json({ message: 'Internal server error' });
+            }
+        });
+
+
+        // to approve study session status
+
+        app.patch('/sessions/approve/:id', async (req, res) => {
+            const { id } = req.params;
+            const { registrationFee } = req.body;
+
+            const result = await sessionsCollection.updateOne(
+                { _id: new ObjectId(id), status: 'pending' },
+                { $set: { status: 'approved', registrationFee: Number(registrationFee) || 0 } }
+            );
+            res.send(result);
+        });
+
+
+
+        // to reject study session amont or data
+
+        app.patch('/sessions/reject/:id', async (req, res) => {
+            const { id } = req.params;
+            const result = await sessionsCollection.updateOne(
+                { _id: new ObjectId(id), status: 'pending' },
+                { $set: { status: 'rejected' } }
+            );
+            res.send(result);
+        });
+
+
+        // to delete study session
+
+        app.delete('/sessions/:id', async (req, res) => {
+            const { id } = req.params;
+            const result = await sessionsCollection.deleteOne({ _id: new ObjectId(id) });
+            res.send(result);
+        });
+
+
+
+        // Create Study Seccion for Tutor
+        app.post('/sessions', async (req, res) => {
+            try {
+                const sessionData = req.body;
+
+                // Optionally add server-side checks or defaults here
+                if (!sessionData.tutorEmail || !sessionData.sessionTitle) {
+                    return res.status(400).json({ message: 'Missing required fields' });
+                }
+
+                console.log(sessionData)
+
+                const result = await sessionsCollection.insertOne(sessionData);
+
+                if (result.insertedId) {
+                    return res.status(201).json({ insertedId: result.insertedId });
+                } else {
+                    return res.status(500).json({ message: 'Failed to create session' });
+                }
+            } catch (err) {
+                console.error('Error creating session:', err);
+                return res.status(500).json({ message: 'Internal server error' });
+            }
+        });
+
+
+        // // student review section 
+        // app.get('/reviews', async (req, res) => {
+        //     try {
+        //         const sessionId = req.query.sessionId;
+
+        //         if (!sessionId) {
+        //             return res.status(400).send({ message: 'Session ID is required' });
+        //         }
+
+        //         const reviews = await reviewsCollection
+        //             .find({ sessionId: sessionId })
+        //             .sort({ createdAt: -1 })
+        //             .toArray();
+
+        //         res.send(reviews);
+        //     } catch (error) {
+        //         console.error('Failed to fetch reviews:', error);
+        //         res.status(500).send({ message: 'Internal Server Error' });
+        //     }
+        // });
+
+        // // POST /reviews
+        // app.post('/reviews', async (req, res) => {
+        //     try {
+        //         const review = req.body;
+
+        //         // Optional: Basic validation
+        //         if (!review.sessionId || !review.studentEmail || !review.rating || !review.comment) {
+        //             return res.status(400).send({ message: 'Missing required fields' });
+        //         }
+
+        //         // Add createdAt timestamp
+        //         review.createdAt = new Date();
+
+        //         const result = await reviewsCollection.insertOne(review);
+
+        //         res.send({
+        //             success: true,
+        //             message: 'Review submitted successfully',
+        //             insertedId: result.insertedId
+        //         });
+        //     } catch (error) {
+        //         console.error('Error submitting review:', error);
+        //         res.status(500).send({ success: false, message: 'Internal server error' });
+        //     }
+        // });
 
 
 
