@@ -3,6 +3,8 @@ const cors = require("cors");
 const app = express();
 require("dotenv").config();
 
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -29,6 +31,27 @@ async function run() {
     const usersCollection = client.db("studysphere").collection("users");
     const sessionsCollection = client.db("studysphere").collection("sessions");
     const reviewsCollection = client.db("studysphere").collection("reviews");
+    const bookedSessionCollection = client.db("studysphere").collection("bookedSession");
+
+    // Stripe post for intent
+    // for payment confirmation from stripe
+        app.post('/create-payment-intent', async (req, res) => {
+            const amountInCents = req.body.amountInCents;
+
+            const paymentIntent = await stripe.paymentIntents.create({
+                amount: amountInCents, // Stripe works in cents
+                currency: 'usd', // or 'bdt' if applicable for test
+                payment_method_types: ['card'],
+            });
+
+            res.send({
+                clientSecret: paymentIntent.client_secret,
+            });
+        });
+
+
+
+
 
     // step 1: users data receive
     app.post("/users", async (req, res) => {
@@ -54,11 +77,11 @@ async function run() {
       const regex = new RegExp(search, "i");
       const query = search
         ? {
-            $or: [
-              { name: { $regex: regex, $options: "i" } },
-              { email: { $regex: regex, $options: "i" } },
-            ],
-          }
+          $or: [
+            { name: { $regex: regex, $options: "i" } },
+            { email: { $regex: regex, $options: "i" } },
+          ],
+        }
         : {};
 
       const users = await usersCollection.find(query).toArray();
@@ -292,6 +315,7 @@ async function run() {
       }
     });
 
+
     // Add this in your backend
     app.post("/reviews", async (req, res) => {
       const review = req.body;
@@ -315,6 +339,89 @@ async function run() {
         res.status(500).json({ message: "Internal server error" });
       }
     });
+
+
+
+
+    // -----------------
+
+    // POST: Book a study session
+    app.post('/bookedSessions', async (req, res) => {
+  try {
+    const {
+      sessionId,
+      studentEmail,
+      tutorEmail,
+      sessionTitle,
+      tutorName,
+      registrationFee,
+      classStartDate,
+      classEndDate,
+      status
+    } = req.body;
+
+    // Basic validation
+    if (!sessionId || !studentEmail || !tutorEmail || !sessionTitle) {
+      return res.status(400).json({ message: 'Missing required fields' });
+    }
+
+    // ✅ Check if already booked by this user for this session
+    const existingBooking = await bookedSessionCollection.findOne({
+      sessionId,
+      studentEmail
+    });
+
+    if (existingBooking) {
+      return res.status(409).json({ message: 'You have already booked this session.' });
+    }
+
+    // Proceed with booking
+    const bookingData = {
+      sessionId,
+      studentEmail,
+      tutorEmail,
+      sessionTitle,
+      tutorName,
+      registrationFee,
+      classStartDate,
+      classEndDate,
+      status: status || 'booked',
+      bookedAt: new Date(),
+    };
+
+    const result = await bookedSessionCollection.insertOne(bookingData);
+    res.status(201).json({ message: 'Session booked successfully', insertedId: result.insertedId });
+
+  } catch (error) {
+    console.error('Booking failed:', error);
+    res.status(500).json({ message: 'Failed to book session' });
+  }
+});
+
+
+
+    // to get bookedSession by user email
+    app.get('/bookedSession/user', async (req, res) => {
+      try {
+        const { email } = req.query;
+
+        if (!email) {
+          return res.status(400).json({ message: 'Email is required' });
+        }
+
+        const bookings = await bookedSessionCollection
+          .find({ studentEmail: email })
+          .sort({ bookedAt: -1 }) // Optional: recent bookings first
+          .toArray();
+
+        res.status(200).json(bookings);
+      } catch (error) {
+        console.error('Failed to fetch bookings:', error);
+        res.status(500).json({ message: 'Failed to fetch bookings' });
+      }
+    });
+
+
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
