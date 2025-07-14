@@ -34,6 +34,7 @@ async function run() {
     const bookedSessionCollection = client
       .db("studysphere")
       .collection("bookedSession");
+    const notesCollection = client.db("studysphere").collection("notes");
 
     // Stripe post for intent
     // for payment confirmation from stripe
@@ -75,11 +76,11 @@ async function run() {
       const regex = new RegExp(search, "i");
       const query = search
         ? {
-            $or: [
-              { name: { $regex: regex, $options: "i" } },
-              { email: { $regex: regex, $options: "i" } },
-            ],
-          }
+          $or: [
+            { name: { $regex: regex, $options: "i" } },
+            { email: { $regex: regex, $options: "i" } },
+          ],
+        }
         : {};
 
       const users = await usersCollection.find(query).toArray();
@@ -455,49 +456,250 @@ async function run() {
       }
     });
 
-    // Get all booked sessions for a student
-    app.get("/bookings/my-sessions", async (req, res) => {
+
+
+    // Example Express route
+    app.get('/bookedSessions/check', async (req, res) => {
+      // ✅ এই path frontend এ match করবে
       try {
-        const studentEmail = req.query.email;
-
-        if (!studentEmail) {
-          return res.status(400).json({ error: "Student email is required" });
-        }
-
-        const sessions = await bookedSessionCollection
-          .find({
-            studentEmail: studentEmail,
-          })
-          .sort({ bookedAt: -1 })
-          .toArray();
-
-        res.status(200).json(sessions);
-      } catch (error) {
-        console.error("Error fetching booked sessions:", error);
-        res.status(500).json({ error: "Internal server error" });
-      }
-    });
-    
-
-    // Get details of a specific booked session
-    app.get("/bookings/:id", async (req, res) => {
-      try {
-        const sessionId = req.params.id;
-
-        const session = await bookedSessionCollection.findOne({
-          _id: new ObjectId(sessionId),
+        const { studentEmail, sessionId } = req.query;
+        const booking = await bookedSessionCollection.findOne({
+          studentEmail,
+          sessionId
         });
-
-        if (!session) {
-          return res.status(404).json({ error: "Session not found" });
-        }
-
-        res.status(200).json(session);
+        res.status(200).json(booking ? [booking] : []);
       } catch (error) {
-        console.error("Error fetching session details:", error);
-        res.status(500).json({ error: "Internal server error" });
+        res.status(500).json({ message: error.message });
       }
     });
+
+
+
+
+    // ******student note related**********
+    // POST /notes - Create a new note
+    app.post("/notes", async (req, res) => {
+      try {
+        const { email, title, description } = req.body;
+
+        // Validation
+        if (!email || !title || !description) {
+          return res.status(400).json({
+            success: false,
+            message: "All fields are required (email, title, description)"
+          });
+        }
+
+        const newNote = {
+          email,
+          title,
+          description,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          status: "active"
+        };
+
+        const result = await notesCollection.insertOne(newNote);
+
+        res.status(201).json({
+          success: true,
+          message: "Note created successfully",
+          insertedId: result.insertedId,
+          note: newNote
+        });
+      } catch (error) {
+        console.error("Error creating note:", error);
+        res.status(500).json({
+          success: false,
+          message: "Failed to create note",
+          error: error.message
+        });
+      }
+    });
+
+
+
+// GET /notes - Get all notes for a user with search functionality
+app.get("/notes", async (req, res) => {
+  try {
+    const { email, search } = req.query;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required"
+      });
+    }
+
+    // Build query with optional search
+    const query = { email };
+    if (search) {
+      query.$or = [
+        { title: { $regex: search, $options: "i" } },
+        { description: { $regex: search, $options: "i" } }
+      ];
+    }
+
+    const notes = await notesCollection.find(query)
+      .sort({ createdAt: -1 }) // Newest first
+      .toArray();
+
+    res.status(200).json({
+      success: true,
+      data: notes
+    });
+  } catch (error) {
+    console.error("Error fetching notes:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch notes",
+      error: error.message
+    });
+  }
+});
+
+
+
+
+// GET /notes/:id - Get single note by ID
+app.get("/notes/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid note ID"
+      });
+    }
+
+    const note = await notesCollection.findOne({
+      _id: new ObjectId(id)
+    });
+
+    if (!note) {
+      return res.status(404).json({
+        success: false,
+        message: "Note not found"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: note
+    });
+  } catch (error) {
+    console.error("Error fetching note:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch note",
+      error: error.message
+    });
+  }
+});
+
+
+
+// PATCH /notes/:id - Update a note
+app.patch("/notes/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, description } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid note ID"
+      });
+    }
+
+    if (!title && !description) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one field (title or description) is required for update"
+      });
+    }
+
+    const updateFields = {
+      updatedAt: new Date()
+    };
+
+    if (title) updateFields.title = title;
+    if (description) updateFields.description = description;
+
+    const result = await notesCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateFields }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Note not found"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Note updated successfully",
+      updatedCount: result.modifiedCount
+    });
+  } catch (error) {
+    console.error("Error updating note:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update note",
+      error: error.message
+    });
+  }
+});
+
+
+
+
+
+// DELETE /notes/:id - Delete a note
+app.delete("/notes/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid note ID"
+      });
+    }
+
+    const result = await notesCollection.deleteOne({
+      _id: new ObjectId(id)
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Note not found or already deleted"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Note deleted successfully"
+    });
+  } catch (error) {
+    console.error("Error deleting note:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete note",
+      error: error.message
+    });
+  }
+});
+
+
+
+
+
+
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
