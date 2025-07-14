@@ -3,7 +3,7 @@ const cors = require("cors");
 const app = express();
 require("dotenv").config();
 
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 // Middleware
 app.use(cors());
@@ -31,27 +31,25 @@ async function run() {
     const usersCollection = client.db("studysphere").collection("users");
     const sessionsCollection = client.db("studysphere").collection("sessions");
     const reviewsCollection = client.db("studysphere").collection("reviews");
-    const bookedSessionCollection = client.db("studysphere").collection("bookedSession");
+    const bookedSessionCollection = client
+      .db("studysphere")
+      .collection("bookedSession");
 
     // Stripe post for intent
     // for payment confirmation from stripe
-        app.post('/create-payment-intent', async (req, res) => {
-            const amountInCents = req.body.amountInCents;
+    app.post("/create-payment-intent", async (req, res) => {
+      const amountInCents = req.body.amountInCents;
 
-            const paymentIntent = await stripe.paymentIntents.create({
-                amount: amountInCents, // Stripe works in cents
-                currency: 'usd', // or 'bdt' if applicable for test
-                payment_method_types: ['card'],
-            });
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amountInCents, // Stripe works in cents
+        currency: "usd", // or 'bdt' if applicable for test
+        payment_method_types: ["card"],
+      });
 
-            res.send({
-                clientSecret: paymentIntent.client_secret,
-            });
-        });
-
-
-
-
+      res.send({
+        clientSecret: paymentIntent.client_secret,
+      });
+    });
 
     // step 1: users data receive
     app.post("/users", async (req, res) => {
@@ -77,11 +75,11 @@ async function run() {
       const regex = new RegExp(search, "i");
       const query = search
         ? {
-          $or: [
-            { name: { $regex: regex, $options: "i" } },
-            { email: { $regex: regex, $options: "i" } },
-          ],
-        }
+            $or: [
+              { name: { $regex: regex, $options: "i" } },
+              { email: { $regex: regex, $options: "i" } },
+            ],
+          }
         : {};
 
       const users = await usersCollection.find(query).toArray();
@@ -315,7 +313,6 @@ async function run() {
       }
     });
 
-
     // Add this in your backend
     app.post("/reviews", async (req, res) => {
       const review = req.body;
@@ -340,73 +337,72 @@ async function run() {
       }
     });
 
-
-
-
     // -----------------
 
     // POST: Book a study session
-    app.post('/bookedSessions', async (req, res) => {
-  try {
-    const {
-      sessionId,
-      studentEmail,
-      tutorEmail,
-      sessionTitle,
-      tutorName,
-      registrationFee,
-      classStartDate,
-      classEndDate,
-      status
-    } = req.body;
+    app.post("/bookedSessions", async (req, res) => {
+      try {
+        const {
+          sessionId,
+          studentEmail,
+          tutorEmail,
+          sessionTitle,
+          tutorName,
+          registrationFee,
+          classStartDate,
+          classEndDate,
+          status,
+        } = req.body;
 
-    // Basic validation
-    if (!sessionId || !studentEmail || !tutorEmail || !sessionTitle) {
-      return res.status(400).json({ message: 'Missing required fields' });
-    }
+        // Basic validation
+        if (!sessionId || !studentEmail || !tutorEmail || !sessionTitle) {
+          return res.status(400).json({ message: "Missing required fields" });
+        }
 
-    // ✅ Check if already booked by this user for this session
-    const existingBooking = await bookedSessionCollection.findOne({
-      sessionId,
-      studentEmail
+        // ✅ Check if already booked by this user for this session
+        const existingBooking = await bookedSessionCollection.findOne({
+          sessionId,
+          studentEmail,
+        });
+
+        if (existingBooking) {
+          return res
+            .status(409)
+            .json({ message: "You have already booked this session." });
+        }
+
+        // Proceed with booking
+        const bookingData = {
+          sessionId,
+          studentEmail,
+          tutorEmail,
+          sessionTitle,
+          tutorName,
+          registrationFee,
+          classStartDate,
+          classEndDate,
+          status: status || "booked",
+          bookedAt: new Date(),
+        };
+
+        const result = await bookedSessionCollection.insertOne(bookingData);
+        res.status(201).json({
+          message: "Session booked successfully",
+          insertedId: result.insertedId,
+        });
+      } catch (error) {
+        console.error("Booking failed:", error);
+        res.status(500).json({ message: "Failed to book session" });
+      }
     });
 
-    if (existingBooking) {
-      return res.status(409).json({ message: 'You have already booked this session.' });
-    }
-
-    // Proceed with booking
-    const bookingData = {
-      sessionId,
-      studentEmail,
-      tutorEmail,
-      sessionTitle,
-      tutorName,
-      registrationFee,
-      classStartDate,
-      classEndDate,
-      status: status || 'booked',
-      bookedAt: new Date(),
-    };
-
-    const result = await bookedSessionCollection.insertOne(bookingData);
-    res.status(201).json({ message: 'Session booked successfully', insertedId: result.insertedId });
-
-  } catch (error) {
-    console.error('Booking failed:', error);
-    res.status(500).json({ message: 'Failed to book session' });
-  }
-});
-
-
-
     // to get bookedSession by user email
-    app.get('/bookedSession/user', async (req, res) => {
+    app.get("/bookedSession/user", async (req, res) => {
       try {
         const { email } = req.query;
 
         if (!email) {
-          return res.status(400).json({ message: 'Email is required' });
+          return res.status(400).json({ message: "Email is required" });
         }
 
         const bookings = await bookedSessionCollection
@@ -416,12 +412,92 @@ async function run() {
 
         res.status(200).json(bookings);
       } catch (error) {
-        console.error('Failed to fetch bookings:', error);
-        res.status(500).json({ message: 'Failed to fetch bookings' });
+        console.error("Failed to fetch bookings:", error);
+        res.status(500).json({ message: "Failed to fetch bookings" });
       }
     });
 
+    // *********update patch******************
 
+    // In your server routes file (e.g., sessions.routes.js)
+    app.patch("/update/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updateData = req.body;
+
+        if (
+          !updateData.sessionTitle ||
+          !updateData.registrationStartDate ||
+          !updateData.registrationEndDate
+        ) {
+          return res
+            .status(400)
+            .json({ message: "Required fields are missing" });
+        }
+
+        const result = await sessionsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updateData }
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).json({ message: "Session not found" });
+        }
+
+        if (result.modifiedCount === 0) {
+          return res.status(200).json({ message: "No changes were made" });
+        }
+
+        res.status(200).json({ message: "Update successful", result });
+      } catch (error) {
+        console.error("Error updating session:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+
+    // Get all booked sessions for a student
+    app.get("/bookings/my-sessions", async (req, res) => {
+      try {
+        const studentEmail = req.query.email;
+
+        if (!studentEmail) {
+          return res.status(400).json({ error: "Student email is required" });
+        }
+
+        const sessions = await bookedSessionCollection
+          .find({
+            studentEmail: studentEmail,
+          })
+          .sort({ bookedAt: -1 })
+          .toArray();
+
+        res.status(200).json(sessions);
+      } catch (error) {
+        console.error("Error fetching booked sessions:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+    
+
+    // Get details of a specific booked session
+    app.get("/bookings/:id", async (req, res) => {
+      try {
+        const sessionId = req.params.id;
+
+        const session = await bookedSessionCollection.findOne({
+          _id: new ObjectId(sessionId),
+        });
+
+        if (!session) {
+          return res.status(404).json({ error: "Session not found" });
+        }
+
+        res.status(200).json(session);
+      } catch (error) {
+        console.error("Error fetching session details:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
