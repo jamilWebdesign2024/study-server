@@ -521,299 +521,355 @@ async function run() {
 
 
 
-// GET /notes - Get all notes for a user with search functionality
-app.get("/notes", async (req, res) => {
+    // GET /notes - Get all notes for a user with search functionality
+    app.get("/notes", async (req, res) => {
+      try {
+        const { email, search } = req.query;
+
+        if (!email) {
+          return res.status(400).json({
+            success: false,
+            message: "Email is required"
+          });
+        }
+
+        // Build query with optional search
+        const query = { email };
+        if (search) {
+          query.$or = [
+            { title: { $regex: search, $options: "i" } },
+            { description: { $regex: search, $options: "i" } }
+          ];
+        }
+
+        const notes = await notesCollection.find(query)
+          .sort({ createdAt: -1 }) // Newest first
+          .toArray();
+
+        res.status(200).json({
+          success: true,
+          data: notes
+        });
+      } catch (error) {
+        console.error("Error fetching notes:", error);
+        res.status(500).json({
+          success: false,
+          message: "Failed to fetch notes",
+          error: error.message
+        });
+      }
+    });
+
+
+
+
+    // GET /notes/:id - Get single note by ID
+    app.get("/notes/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid note ID"
+          });
+        }
+
+        const note = await notesCollection.findOne({
+          _id: new ObjectId(id)
+        });
+
+        if (!note) {
+          return res.status(404).json({
+            success: false,
+            message: "Note not found"
+          });
+        }
+
+        res.status(200).json({
+          success: true,
+          data: note
+        });
+      } catch (error) {
+        console.error("Error fetching note:", error);
+        res.status(500).json({
+          success: false,
+          message: "Failed to fetch note",
+          error: error.message
+        });
+      }
+    });
+
+
+
+    // PATCH /notes/:id - Update a note
+    app.patch("/notes/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { title, description } = req.body;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid note ID"
+          });
+        }
+
+        if (!title && !description) {
+          return res.status(400).json({
+            success: false,
+            message: "At least one field (title or description) is required for update"
+          });
+        }
+
+        const updateFields = {
+          updatedAt: new Date()
+        };
+
+        if (title) updateFields.title = title;
+        if (description) updateFields.description = description;
+
+        const result = await notesCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updateFields }
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "Note not found"
+          });
+        }
+
+        res.status(200).json({
+          success: true,
+          message: "Note updated successfully",
+          updatedCount: result.modifiedCount
+        });
+      } catch (error) {
+        console.error("Error updating note:", error);
+        res.status(500).json({
+          success: false,
+          message: "Failed to update note",
+          error: error.message
+        });
+      }
+    });
+
+
+
+
+
+    // DELETE /notes/:id - Delete a note
+    app.delete("/notes/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid note ID"
+          });
+        }
+
+        const result = await notesCollection.deleteOne({
+          _id: new ObjectId(id)
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "Note not found or already deleted"
+          });
+        }
+
+        res.status(200).json({
+          success: true,
+          message: "Note deleted successfully"
+        });
+      } catch (error) {
+        console.error("Error deleting note:", error);
+        res.status(500).json({
+          success: false,
+          message: "Failed to delete note",
+          error: error.message
+        });
+      }
+    });
+
+
+    // *************************Materials api*********************************
+
+
+    // routes/materials.js or inside app.post('/materials', ...)
+    app.post('/materials', async (req, res) => {
+      try {
+        const { title, imageUrl, sessionId, tutorEmail, resourceLinks } = req.body;
+
+        // basic validation
+        if (!title || !imageUrl || !sessionId || !tutorEmail || !resourceLinks?.length) {
+          return res.status(400).json({ message: "Missing required fields" });
+        }
+
+        const material = {
+          title,
+          imageUrl,
+          sessionId,
+          tutorEmail,
+          resourceLinks, // accepts [{url, type}, ...]
+          uploadedAt: new Date()
+        };
+
+        const result = await materialsCollection.insertOne(material);
+        res.status(201).json({ message: "Material uploaded", insertedId: result.insertedId });
+
+      } catch (error) {
+        console.error("Material upload error:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+
+
+
+
+    // GET materials for a tutor
+    app.get('/materials', async (req, res) => {
+      try {
+        const { tutorEmail } = req.query;
+        if (!tutorEmail) {
+          return res.status(400).json({ message: "tutorEmail query param is required" });
+        }
+
+        const materials = await materialsCollection
+          .find({ tutorEmail })
+          .sort({ uploadedAt: -1 })
+          .toArray();
+
+        res.status(200).json(materials);
+      } catch (error) {
+        console.error("Error fetching materials:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+
+
+
+    // DELETE material by ID
+    app.delete('/materials/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({ message: "Invalid material ID" });
+        }
+
+        const result = await materialsCollection.deleteOne({ _id: new ObjectId(id) });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ message: "Material not found or already deleted" });
+        }
+
+        res.status(200).json({ message: "Material deleted successfully" });
+      } catch (error) {
+        console.error("Error deleting material:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+
+
+
+    // PATCH (update) material by ID
+    app.patch('/materials/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { title, resourceLinks } = req.body;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({ message: "Invalid material ID" });
+        }
+
+        if (!title || !Array.isArray(resourceLinks)) {
+          return res.status(400).json({ message: "Title and resourceLinks are required" });
+        }
+
+        const updateData = {
+          title,
+          resourceLinks,
+          // Optionally update updatedAt field if you want
+          updatedAt: new Date()
+        };
+
+        const result = await materialsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updateData }
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).json({ message: "Material not found" });
+        }
+
+        res.status(200).json({ message: "Material updated successfully" });
+      } catch (error) {
+        console.error("Error updating material:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+
+
+
+
+
+    // Optional: Specific API only for students
+// FIXED ✅✅✅
+app.get('/student/materials', async (req, res) => {
   try {
-    const { email, search } = req.query;
+    const { sessionId } = req.query;
 
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: "Email is required"
-      });
-    }
-
-    // Build query with optional search
-    const query = { email };
-    if (search) {
-      query.$or = [
-        { title: { $regex: search, $options: "i" } },
-        { description: { $regex: search, $options: "i" } }
-      ];
-    }
-
-    const notes = await notesCollection.find(query)
-      .sort({ createdAt: -1 }) // Newest first
-      .toArray();
-
-    res.status(200).json({
-      success: true,
-      data: notes
-    });
-  } catch (error) {
-    console.error("Error fetching notes:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch notes",
-      error: error.message
-    });
-  }
-});
-
-
-
-
-// GET /notes/:id - Get single note by ID
-app.get("/notes/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid note ID"
-      });
-    }
-
-    const note = await notesCollection.findOne({
-      _id: new ObjectId(id)
-    });
-
-    if (!note) {
-      return res.status(404).json({
-        success: false,
-        message: "Note not found"
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      data: note
-    });
-  } catch (error) {
-    console.error("Error fetching note:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch note",
-      error: error.message
-    });
-  }
-});
-
-
-
-// PATCH /notes/:id - Update a note
-app.patch("/notes/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { title, description } = req.body;
-
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid note ID"
-      });
-    }
-
-    if (!title && !description) {
-      return res.status(400).json({
-        success: false,
-        message: "At least one field (title or description) is required for update"
-      });
-    }
-
-    const updateFields = {
-      updatedAt: new Date()
-    };
-
-    if (title) updateFields.title = title;
-    if (description) updateFields.description = description;
-
-    const result = await notesCollection.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: updateFields }
-    );
-
-    if (result.matchedCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Note not found"
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "Note updated successfully",
-      updatedCount: result.modifiedCount
-    });
-  } catch (error) {
-    console.error("Error updating note:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to update note",
-      error: error.message
-    });
-  }
-});
-
-
-
-
-
-// DELETE /notes/:id - Delete a note
-app.delete("/notes/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid note ID"
-      });
-    }
-
-    const result = await notesCollection.deleteOne({
-      _id: new ObjectId(id)
-    });
-
-    if (result.deletedCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Note not found or already deleted"
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "Note deleted successfully"
-    });
-  } catch (error) {
-    console.error("Error deleting note:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete note",
-      error: error.message
-    });
-  }
-});
-
-
-// *************************Materials api*********************************
-
-
-// routes/materials.js or inside app.post('/materials', ...)
-app.post('/materials', async (req, res) => {
-  try {
-    const { title, imageUrl, sessionId, tutorEmail, resourceLinks } = req.body;
-
-    // basic validation
-    if (!title || !imageUrl || !sessionId || !tutorEmail || !resourceLinks?.length) {
-      return res.status(400).json({ message: "Missing required fields" });
-    }
-
-    const material = {
-      title,
-      imageUrl,
-      sessionId,
-      tutorEmail,
-      resourceLinks, // accepts [{url, type}, ...]
-      uploadedAt: new Date()
-    };
-
-    const result = await materialsCollection.insertOne(material);
-    res.status(201).json({ message: "Material uploaded", insertedId: result.insertedId });
-
-  } catch (error) {
-    console.error("Material upload error:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-});
-
-
-
-
-// GET materials for a tutor
-app.get('/materials', async (req, res) => {
-  try {
-    const { tutorEmail } = req.query;
-    if (!tutorEmail) {
-      return res.status(400).json({ message: "tutorEmail query param is required" });
+    if (!sessionId) {
+      return res.status(400).json({ message: "sessionId is required" });
     }
 
     const materials = await materialsCollection
-      .find({ tutorEmail })
+      .find({ sessionId })
       .sort({ uploadedAt: -1 })
       .toArray();
 
     res.status(200).json(materials);
   } catch (error) {
-    console.error("Error fetching materials:", error);
+    console.error("Error fetching materials for student:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
 
 
 
-// DELETE material by ID
-app.delete('/materials/:id', async (req, res) => {
+
+
+
+    // ✅ Booked sessions for a student by email
+app.get("/bookedSession/user", async (req, res) => {
   try {
-    const { id } = req.params;
+    const { email } = req.query;
 
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ message: "Invalid material ID" });
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
     }
 
-    const result = await materialsCollection.deleteOne({ _id: new ObjectId(id) });
+    const bookings = await bookedSessionCollection
+      .find({ studentEmail: email })
+      .sort({ bookedAt: -1 }) // সর্বশেষ বুকিং আগে দেখাবে
+      .toArray();
 
-    if (result.deletedCount === 0) {
-      return res.status(404).json({ message: "Material not found or already deleted" });
-    }
-
-    res.status(200).json({ message: "Material deleted successfully" });
+    res.status(200).json(bookings);
   } catch (error) {
-    console.error("Error deleting material:", error);
-    res.status(500).json({ message: "Internal server error" });
+    console.error("Failed to fetch bookings:", error);
+    res.status(500).json({ message: "Failed to fetch bookings" });
   }
 });
 
 
 
-// PATCH (update) material by ID
-app.patch('/materials/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { title, resourceLinks } = req.body;
 
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ message: "Invalid material ID" });
-    }
-
-    if (!title || !Array.isArray(resourceLinks)) {
-      return res.status(400).json({ message: "Title and resourceLinks are required" });
-    }
-
-    const updateData = {
-      title,
-      resourceLinks,
-      // Optionally update updatedAt field if you want
-      updatedAt: new Date()
-    };
-
-    const result = await materialsCollection.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: updateData }
-    );
-
-    if (result.matchedCount === 0) {
-      return res.status(404).json({ message: "Material not found" });
-    }
-
-    res.status(200).json({ message: "Material updated successfully" });
-  } catch (error) {
-    console.error("Error updating material:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-});
 
 
 
