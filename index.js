@@ -35,6 +35,8 @@ async function run() {
       .db("studysphere")
       .collection("bookedSession");
     const notesCollection = client.db("studysphere").collection("notes");
+    const materialsCollection = client.db("studysphere").collection("materials");
+
 
     // Stripe post for intent
     // for payment confirmation from stripe
@@ -692,6 +694,124 @@ app.delete("/notes/:id", async (req, res) => {
       message: "Failed to delete note",
       error: error.message
     });
+  }
+});
+
+
+// *************************Materials api*********************************
+
+
+// routes/materials.js or inside app.post('/materials', ...)
+app.post('/materials', async (req, res) => {
+  try {
+    const { title, imageUrl, sessionId, tutorEmail, resourceLinks } = req.body;
+
+    // basic validation
+    if (!title || !imageUrl || !sessionId || !tutorEmail || !resourceLinks?.length) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    const material = {
+      title,
+      imageUrl,
+      sessionId,
+      tutorEmail,
+      resourceLinks, // accepts [{url, type}, ...]
+      uploadedAt: new Date()
+    };
+
+    const result = await materialsCollection.insertOne(material);
+    res.status(201).json({ message: "Material uploaded", insertedId: result.insertedId });
+
+  } catch (error) {
+    console.error("Material upload error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+
+
+
+// GET materials for a tutor
+app.get('/materials', async (req, res) => {
+  try {
+    const { tutorEmail } = req.query;
+    if (!tutorEmail) {
+      return res.status(400).json({ message: "tutorEmail query param is required" });
+    }
+
+    const materials = await materialsCollection
+      .find({ tutorEmail })
+      .sort({ uploadedAt: -1 })
+      .toArray();
+
+    res.status(200).json(materials);
+  } catch (error) {
+    console.error("Error fetching materials:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+
+
+// DELETE material by ID
+app.delete('/materials/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid material ID" });
+    }
+
+    const result = await materialsCollection.deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: "Material not found or already deleted" });
+    }
+
+    res.status(200).json({ message: "Material deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting material:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+
+
+// PATCH (update) material by ID
+app.patch('/materials/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, resourceLinks } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid material ID" });
+    }
+
+    if (!title || !Array.isArray(resourceLinks)) {
+      return res.status(400).json({ message: "Title and resourceLinks are required" });
+    }
+
+    const updateData = {
+      title,
+      resourceLinks,
+      // Optionally update updatedAt field if you want
+      updatedAt: new Date()
+    };
+
+    const result = await materialsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateData }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: "Material not found" });
+    }
+
+    res.status(200).json({ message: "Material updated successfully" });
+  } catch (error) {
+    console.error("Error updating material:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 });
 
