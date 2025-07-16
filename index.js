@@ -872,6 +872,53 @@ app.get("/bookedSession/user", async (req, res) => {
 
 
 
+// ✅ Admin: Get all materials without filtering by tutorEmail
+app.get('/admin/materials', async (req, res) => {
+  try {
+    const materials = await materialsCollection
+      .find({})
+      .sort({ uploadedAt: -1 })
+      .toArray();
+
+    res.status(200).json(materials);
+  } catch (error) {
+    console.error("Error fetching all materials for admin:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+
+
+
+
+// DELETE a material by ID
+app.delete('/materials/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid material ID" });
+    }
+
+    const result = await materialsCollection.deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: "Material not found or already deleted" });
+    }
+
+    res.status(200).json({ message: "Material deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting material:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+
+
+
+
+
+
 
 
 
