@@ -820,26 +820,26 @@ async function run() {
 
 
     // Optional: Specific API only for students
-// FIXED ✅✅✅
-app.get('/student/materials', async (req, res) => {
-  try {
-    const { sessionId } = req.query;
+    // FIXED ✅✅✅
+    app.get('/student/materials', async (req, res) => {
+      try {
+        const { sessionId } = req.query;
 
-    if (!sessionId) {
-      return res.status(400).json({ message: "sessionId is required" });
-    }
+        if (!sessionId) {
+          return res.status(400).json({ message: "sessionId is required" });
+        }
 
-    const materials = await materialsCollection
-      .find({ sessionId })
-      .sort({ uploadedAt: -1 })
-      .toArray();
+        const materials = await materialsCollection
+          .find({ sessionId })
+          .sort({ uploadedAt: -1 })
+          .toArray();
 
-    res.status(200).json(materials);
-  } catch (error) {
-    console.error("Error fetching materials for student:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-});
+        res.status(200).json(materials);
+      } catch (error) {
+        console.error("Error fetching materials for student:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
 
 
 
@@ -847,71 +847,164 @@ app.get('/student/materials', async (req, res) => {
 
 
     // ✅ Booked sessions for a student by email
-app.get("/bookedSession/user", async (req, res) => {
+    app.get("/bookedSession/user", async (req, res) => {
+      try {
+        const { email } = req.query;
+
+        if (!email) {
+          return res.status(400).json({ message: "Email is required" });
+        }
+
+        const bookings = await bookedSessionCollection
+          .find({ studentEmail: email })
+          .sort({ bookedAt: -1 }) // সর্বশেষ বুকিং আগে দেখাবে
+          .toArray();
+
+        res.status(200).json(bookings);
+      } catch (error) {
+        console.error("Failed to fetch bookings:", error);
+        res.status(500).json({ message: "Failed to fetch bookings" });
+      }
+    });
+
+
+
+
+
+
+    // ✅ Admin: Get all materials without filtering by tutorEmail
+    app.get('/admin/materials', async (req, res) => {
+      try {
+        const materials = await materialsCollection
+          .find({})
+          .sort({ uploadedAt: -1 })
+          .toArray();
+
+        res.status(200).json(materials);
+      } catch (error) {
+        console.error("Error fetching all materials for admin:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+
+
+
+
+
+    // DELETE a material by ID
+    app.delete('/materials/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({ message: "Invalid material ID" });
+        }
+
+        const result = await materialsCollection.deleteOne({ _id: new ObjectId(id) });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ message: "Material not found or already deleted" });
+        }
+
+        res.status(200).json({ message: "Material deleted successfully" });
+      } catch (error) {
+        console.error("Error deleting material:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+
+
+
+
+    // all tutors api*********************************
+
+    // GET /users/tutors - Get all tutors with optional search
+    app.get('/users/tutors', async (req, res) => {
+      try {
+        const { search } = req.query;
+        const query = { role: 'tutor' }; // Only fetch users with tutor role
+
+        // Add search functionality if search term exists
+        if (search) {
+          const regex = new RegExp(search, 'i');
+          query.$or = [
+            { name: { $regex: regex } },
+            { email: { $regex: regex } },
+            { 'subjects': { $regex: regex } } // Search in subjects array
+          ];
+        }
+
+        // Fetch tutors with additional tutor-specific fields
+        const tutors = await usersCollection.find(query).project({
+          name: 1,
+          email: 1,
+          image: 1,
+          subjects: 1,
+          bio: 1,
+          education: 1,
+          experience: 1,
+          hourlyRate: 1,
+          rating: 1,
+          reviews: 1,
+          sessions: 1,
+          _id: 1
+        }).toArray();
+
+        // Calculate average rating if not already stored
+        const tutorsWithRating = tutors.map(tutor => {
+          if (!tutor.rating && tutor.reviews?.length > 0) {
+            const avgRating = tutor.reviews.reduce((sum, review) => sum + review.rating, 0) / tutor.reviews.length;
+            return { ...tutor, rating: avgRating.toFixed(1) };
+          }
+          return tutor;
+        });
+
+        res.status(200).json(tutorsWithRating);
+      } catch (error) {
+        console.error('Failed to fetch tutors:', error);
+        res.status(500).json({ message: 'Failed to fetch tutors', error: error.message });
+      }
+    });
+
+
+    // ✅ /sessions/all?search=math&page=1&limit=6
+   app.get('/sessions/all', async (req, res) => {
   try {
-    const { email } = req.query;
+    const search = req.query.search || "";
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
-    if (!email) {
-      return res.status(400).json({ message: "Email is required" });
-    }
+    const regex = new RegExp(search, 'i'); // case-insensitive
 
-    const bookings = await bookedSessionCollection
-      .find({ studentEmail: email })
-      .sort({ bookedAt: -1 }) // সর্বশেষ বুকিং আগে দেখাবে
+    const query = {
+      $or: [
+        { sessionTitle: { $regex: regex } },
+        { tutorName: { $regex: regex } },
+        { subject: { $regex: regex } }
+      ]
+    };
+
+    const total = await sessionsCollection.countDocuments(query);
+    const sessions = await sessionsCollection
+      .find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
       .toArray();
 
-    res.status(200).json(bookings);
+    res.status(200).json({
+      sessions,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit)
+    });
   } catch (error) {
-    console.error("Failed to fetch bookings:", error);
-    res.status(500).json({ message: "Failed to fetch bookings" });
+    res.status(500).json({ message: "Something went wrong", error });
   }
 });
 
 
-
-
-
-
-// ✅ Admin: Get all materials without filtering by tutorEmail
-app.get('/admin/materials', async (req, res) => {
-  try {
-    const materials = await materialsCollection
-      .find({})
-      .sort({ uploadedAt: -1 })
-      .toArray();
-
-    res.status(200).json(materials);
-  } catch (error) {
-    console.error("Error fetching all materials for admin:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-});
-
-
-
-
-
-// DELETE a material by ID
-app.delete('/materials/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ message: "Invalid material ID" });
-    }
-
-    const result = await materialsCollection.deleteOne({ _id: new ObjectId(id) });
-
-    if (result.deletedCount === 0) {
-      return res.status(404).json({ message: "Material not found or already deleted" });
-    }
-
-    res.status(200).json({ message: "Material deleted successfully" });
-  } catch (error) {
-    console.error("Error deleting material:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-});
 
 
 
