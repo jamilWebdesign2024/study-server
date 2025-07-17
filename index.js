@@ -967,40 +967,99 @@ async function run() {
     });
 
 
+
+
     // ✅ /sessions/all?search=math&page=1&limit=6
-   app.get('/sessions/all', async (req, res) => {
+  // GET /sessions/all with pagination, search, and filtering
+app.get('/sessions/all', async (req, res) => {
   try {
-    const search = req.query.search || "";
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
+    const page = parseInt(req.query.page) || 0;
+    const limit = parseInt(req.query.limit) || 6;
+    const search = req.query.search || '';
+    const category = req.query.category || '';
+    const status = req.query.status || '';
 
-    const regex = new RegExp(search, 'i'); // case-insensitive
+    // Validate inputs
+    if (isNaN(page)) throw new Error('Invalid page number');
+    if (isNaN(limit)) throw new Error('Invalid limit value');
 
-    const query = {
-      $or: [
-        { sessionTitle: { $regex: regex } },
-        { tutorName: { $regex: regex } },
-        { subject: { $regex: regex } }
-      ]
-    };
+    // Build query
+    const query = {};
 
+    // Search filter
+    if (search) {
+      query.$or = [
+        { sessionTitle: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { tutorName: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // Category filter
+    if (category) {
+      query.category = category;
+    }
+
+    // Status filter
+    if (status) {
+      const now = new Date();
+      switch (status) {
+        case 'upcoming':
+          query.registrationStartDate = { $gt: now };
+          break;
+        case 'ongoing':
+          query.$and = [
+            { registrationStartDate: { $lte: now } },
+            { registrationEndDate: { $gte: now } }
+          ];
+          break;
+        case 'closed':
+          query.registrationEndDate = { $lt: now };
+          break;
+      }
+    }
+
+    // Get total count
     const total = await sessionsCollection.countDocuments(query);
-    const sessions = await sessionsCollection
-      .find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .toArray();
+
+    // Get paginated results with required fields
+    const sessions = await sessionsCollection.find(query, {
+      projection: {
+        _id: 1,
+        sessionTitle: 1,
+        description: 1,
+        image: 1,
+        tutorName: 1,
+        category: 1,
+        registrationStartDate: 1,
+        registrationEndDate: 1,
+        sessionDuration: 1,
+        enrolledStudents: 1
+      }
+    })
+    .sort({ createdAt: -1 })
+    .skip(page * limit)
+    .limit(limit)
+    .toArray();
+
+    // Calculate if more pages exist
+    const hasMore = (page + 1) * limit < total;
 
     res.status(200).json({
+      success: true,
       sessions,
       total,
       page,
-      totalPages: Math.ceil(total / limit)
+      hasMore
     });
+
   } catch (error) {
-    res.status(500).json({ message: "Something went wrong", error });
+    console.error('Error fetching sessions:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to fetch sessions',
+      error: error.message 
+    });
   }
 });
 
