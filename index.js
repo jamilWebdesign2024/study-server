@@ -35,8 +35,9 @@ async function run() {
       .db("studysphere")
       .collection("bookedSession");
     const notesCollection = client.db("studysphere").collection("notes");
-    const materialsCollection = client.db("studysphere").collection("materials");
-
+    const materialsCollection = client
+      .db("studysphere")
+      .collection("materials");
 
     // Stripe post for intent
     // for payment confirmation from stripe
@@ -78,11 +79,11 @@ async function run() {
       const regex = new RegExp(search, "i");
       const query = search
         ? {
-          $or: [
-            { name: { $regex: regex, $options: "i" } },
-            { email: { $regex: regex, $options: "i" } },
-          ],
-        }
+            $or: [
+              { name: { $regex: regex, $options: "i" } },
+              { email: { $regex: regex, $options: "i" } },
+            ],
+          }
         : {};
 
       const users = await usersCollection.find(query).toArray();
@@ -190,12 +191,19 @@ async function run() {
 
     app.patch("/sessions/reapply/:id", async (req, res) => {
       const { id } = req.params;
+      const { status, isResubmitted } = req.body;
 
       try {
-        const filter = { _id: new ObjectId(id), status: "rejected" };
-        const update = { $set: { status: "pending" } };
-
-        const result = await sessionsCollection.updateOne(filter, update);
+        const result = await sessionsCollection.updateOne(
+          { _id: new ObjectId(id), status: "rejected" },
+          {
+            $set: {
+              status,
+              isResubmitted,
+              resubmittedAt: new Date(), // Optional: tracking
+            },
+          }
+        );
 
         if (result.modifiedCount > 0) {
           res.status(200).json({ modifiedCount: result.modifiedCount });
@@ -232,11 +240,25 @@ async function run() {
 
     app.patch("/sessions/reject/:id", async (req, res) => {
       const { id } = req.params;
-      const result = await sessionsCollection.updateOne(
-        { _id: new ObjectId(id), status: "pending" },
-        { $set: { status: "rejected" } }
-      );
-      res.send(result);
+      const { status, rejectionReason, feedback } = req.body;
+
+      try {
+        const result = await sessionsCollection.updateOne(
+          { _id: new ObjectId(id), status: "pending" },
+          {
+            $set: {
+              status,
+              rejectionReason,
+              feedback,
+              rejectedAt: new Date(), // Optional: rejection time tracking
+            },
+          }
+        );
+        res.send(result);
+      } catch (error) {
+        console.error("Reject API error:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
     });
 
     // to delete study session
@@ -458,25 +480,20 @@ async function run() {
       }
     });
 
-
-
     // Example Express route
-    app.get('/bookedSessions/check', async (req, res) => {
+    app.get("/bookedSessions/check", async (req, res) => {
       // ✅ এই path frontend এ match করবে
       try {
         const { studentEmail, sessionId } = req.query;
         const booking = await bookedSessionCollection.findOne({
           studentEmail,
-          sessionId
+          sessionId,
         });
         res.status(200).json(booking ? [booking] : []);
       } catch (error) {
         res.status(500).json({ message: error.message });
       }
     });
-
-
-
 
     // ******student note related**********
     // POST /notes - Create a new note
@@ -488,7 +505,7 @@ async function run() {
         if (!email || !title || !description) {
           return res.status(400).json({
             success: false,
-            message: "All fields are required (email, title, description)"
+            message: "All fields are required (email, title, description)",
           });
         }
 
@@ -498,7 +515,7 @@ async function run() {
           description,
           createdAt: new Date(),
           updatedAt: new Date(),
-          status: "active"
+          status: "active",
         };
 
         const result = await notesCollection.insertOne(newNote);
@@ -507,19 +524,17 @@ async function run() {
           success: true,
           message: "Note created successfully",
           insertedId: result.insertedId,
-          note: newNote
+          note: newNote,
         });
       } catch (error) {
         console.error("Error creating note:", error);
         res.status(500).json({
           success: false,
           message: "Failed to create note",
-          error: error.message
+          error: error.message,
         });
       }
     });
-
-
 
     // GET /notes - Get all notes for a user with search functionality
     app.get("/notes", async (req, res) => {
@@ -529,7 +544,7 @@ async function run() {
         if (!email) {
           return res.status(400).json({
             success: false,
-            message: "Email is required"
+            message: "Email is required",
           });
         }
 
@@ -538,30 +553,28 @@ async function run() {
         if (search) {
           query.$or = [
             { title: { $regex: search, $options: "i" } },
-            { description: { $regex: search, $options: "i" } }
+            { description: { $regex: search, $options: "i" } },
           ];
         }
 
-        const notes = await notesCollection.find(query)
+        const notes = await notesCollection
+          .find(query)
           .sort({ createdAt: -1 }) // Newest first
           .toArray();
 
         res.status(200).json({
           success: true,
-          data: notes
+          data: notes,
         });
       } catch (error) {
         console.error("Error fetching notes:", error);
         res.status(500).json({
           success: false,
           message: "Failed to fetch notes",
-          error: error.message
+          error: error.message,
         });
       }
     });
-
-
-
 
     // GET /notes/:id - Get single note by ID
     app.get("/notes/:id", async (req, res) => {
@@ -571,36 +584,34 @@ async function run() {
         if (!ObjectId.isValid(id)) {
           return res.status(400).json({
             success: false,
-            message: "Invalid note ID"
+            message: "Invalid note ID",
           });
         }
 
         const note = await notesCollection.findOne({
-          _id: new ObjectId(id)
+          _id: new ObjectId(id),
         });
 
         if (!note) {
           return res.status(404).json({
             success: false,
-            message: "Note not found"
+            message: "Note not found",
           });
         }
 
         res.status(200).json({
           success: true,
-          data: note
+          data: note,
         });
       } catch (error) {
         console.error("Error fetching note:", error);
         res.status(500).json({
           success: false,
           message: "Failed to fetch note",
-          error: error.message
+          error: error.message,
         });
       }
     });
-
-
 
     // PATCH /notes/:id - Update a note
     app.patch("/notes/:id", async (req, res) => {
@@ -611,19 +622,20 @@ async function run() {
         if (!ObjectId.isValid(id)) {
           return res.status(400).json({
             success: false,
-            message: "Invalid note ID"
+            message: "Invalid note ID",
           });
         }
 
         if (!title && !description) {
           return res.status(400).json({
             success: false,
-            message: "At least one field (title or description) is required for update"
+            message:
+              "At least one field (title or description) is required for update",
           });
         }
 
         const updateFields = {
-          updatedAt: new Date()
+          updatedAt: new Date(),
         };
 
         if (title) updateFields.title = title;
@@ -637,28 +649,24 @@ async function run() {
         if (result.matchedCount === 0) {
           return res.status(404).json({
             success: false,
-            message: "Note not found"
+            message: "Note not found",
           });
         }
 
         res.status(200).json({
           success: true,
           message: "Note updated successfully",
-          updatedCount: result.modifiedCount
+          updatedCount: result.modifiedCount,
         });
       } catch (error) {
         console.error("Error updating note:", error);
         res.status(500).json({
           success: false,
           message: "Failed to update note",
-          error: error.message
+          error: error.message,
         });
       }
     });
-
-
-
-
 
     // DELETE /notes/:id - Delete a note
     app.delete("/notes/:id", async (req, res) => {
@@ -668,46 +676,51 @@ async function run() {
         if (!ObjectId.isValid(id)) {
           return res.status(400).json({
             success: false,
-            message: "Invalid note ID"
+            message: "Invalid note ID",
           });
         }
 
         const result = await notesCollection.deleteOne({
-          _id: new ObjectId(id)
+          _id: new ObjectId(id),
         });
 
         if (result.deletedCount === 0) {
           return res.status(404).json({
             success: false,
-            message: "Note not found or already deleted"
+            message: "Note not found or already deleted",
           });
         }
 
         res.status(200).json({
           success: true,
-          message: "Note deleted successfully"
+          message: "Note deleted successfully",
         });
       } catch (error) {
         console.error("Error deleting note:", error);
         res.status(500).json({
           success: false,
           message: "Failed to delete note",
-          error: error.message
+          error: error.message,
         });
       }
     });
 
-
     // *************************Materials api*********************************
 
-
     // routes/materials.js or inside app.post('/materials', ...)
-    app.post('/materials', async (req, res) => {
+    app.post("/materials", async (req, res) => {
       try {
-        const { title, imageUrl, sessionId, tutorEmail, resourceLinks } = req.body;
+        const { title, imageUrl, sessionId, tutorEmail, resourceLinks } =
+          req.body;
 
         // basic validation
-        if (!title || !imageUrl || !sessionId || !tutorEmail || !resourceLinks?.length) {
+        if (
+          !title ||
+          !imageUrl ||
+          !sessionId ||
+          !tutorEmail ||
+          !resourceLinks?.length
+        ) {
           return res.status(400).json({ message: "Missing required fields" });
         }
 
@@ -717,27 +730,28 @@ async function run() {
           sessionId,
           tutorEmail,
           resourceLinks, // accepts [{url, type}, ...]
-          uploadedAt: new Date()
+          uploadedAt: new Date(),
         };
 
         const result = await materialsCollection.insertOne(material);
-        res.status(201).json({ message: "Material uploaded", insertedId: result.insertedId });
-
+        res.status(201).json({
+          message: "Material uploaded",
+          insertedId: result.insertedId,
+        });
       } catch (error) {
         console.error("Material upload error:", error);
         res.status(500).json({ message: "Internal server error" });
       }
     });
 
-
-
-
     // GET materials for a tutor
-    app.get('/materials', async (req, res) => {
+    app.get("/materials", async (req, res) => {
       try {
         const { tutorEmail } = req.query;
         if (!tutorEmail) {
-          return res.status(400).json({ message: "tutorEmail query param is required" });
+          return res
+            .status(400)
+            .json({ message: "tutorEmail query param is required" });
         }
 
         const materials = await materialsCollection
@@ -752,10 +766,8 @@ async function run() {
       }
     });
 
-
-
     // DELETE material by ID
-    app.delete('/materials/:id', async (req, res) => {
+    app.delete("/materials/:id", async (req, res) => {
       try {
         const { id } = req.params;
 
@@ -763,10 +775,14 @@ async function run() {
           return res.status(400).json({ message: "Invalid material ID" });
         }
 
-        const result = await materialsCollection.deleteOne({ _id: new ObjectId(id) });
+        const result = await materialsCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
 
         if (result.deletedCount === 0) {
-          return res.status(404).json({ message: "Material not found or already deleted" });
+          return res
+            .status(404)
+            .json({ message: "Material not found or already deleted" });
         }
 
         res.status(200).json({ message: "Material deleted successfully" });
@@ -776,10 +792,8 @@ async function run() {
       }
     });
 
-
-
     // PATCH (update) material by ID
-    app.patch('/materials/:id', async (req, res) => {
+    app.patch("/materials/:id", async (req, res) => {
       try {
         const { id } = req.params;
         const { title, resourceLinks } = req.body;
@@ -789,14 +803,16 @@ async function run() {
         }
 
         if (!title || !Array.isArray(resourceLinks)) {
-          return res.status(400).json({ message: "Title and resourceLinks are required" });
+          return res
+            .status(400)
+            .json({ message: "Title and resourceLinks are required" });
         }
 
         const updateData = {
           title,
           resourceLinks,
           // Optionally update updatedAt field if you want
-          updatedAt: new Date()
+          updatedAt: new Date(),
         };
 
         const result = await materialsCollection.updateOne(
@@ -815,13 +831,9 @@ async function run() {
       }
     });
 
-
-
-
-
     // Optional: Specific API only for students
     // FIXED ✅✅✅
-    app.get('/student/materials', async (req, res) => {
+    app.get("/student/materials", async (req, res) => {
       try {
         const { sessionId } = req.query;
 
@@ -840,11 +852,6 @@ async function run() {
         res.status(500).json({ message: "Internal server error" });
       }
     });
-
-
-
-
-
 
     // ✅ Booked sessions for a student by email
     app.get("/bookedSession/user", async (req, res) => {
@@ -867,13 +874,8 @@ async function run() {
       }
     });
 
-
-
-
-
-
     // ✅ Admin: Get all materials without filtering by tutorEmail
-    app.get('/admin/materials', async (req, res) => {
+    app.get("/admin/materials", async (req, res) => {
       try {
         const materials = await materialsCollection
           .find({})
@@ -887,12 +889,8 @@ async function run() {
       }
     });
 
-
-
-
-
     // DELETE a material by ID
-    app.delete('/materials/:id', async (req, res) => {
+    app.delete("/materials/:id", async (req, res) => {
       try {
         const { id } = req.params;
 
@@ -900,10 +898,14 @@ async function run() {
           return res.status(400).json({ message: "Invalid material ID" });
         }
 
-        const result = await materialsCollection.deleteOne({ _id: new ObjectId(id) });
+        const result = await materialsCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
 
         if (result.deletedCount === 0) {
-          return res.status(404).json({ message: "Material not found or already deleted" });
+          return res
+            .status(404)
+            .json({ message: "Material not found or already deleted" });
         }
 
         res.status(200).json({ message: "Material deleted successfully" });
@@ -913,47 +915,49 @@ async function run() {
       }
     });
 
-
-
-
     // all tutors api*********************************
 
     // GET /users/tutors - Get all tutors with optional search
-    app.get('/users/tutors', async (req, res) => {
+    app.get("/users/tutors", async (req, res) => {
       try {
         const { search } = req.query;
-        const query = { role: 'tutor' }; // Only fetch users with tutor role
+        const query = { role: "tutor" }; // Only fetch users with tutor role
 
         // Add search functionality if search term exists
         if (search) {
-          const regex = new RegExp(search, 'i');
+          const regex = new RegExp(search, "i");
           query.$or = [
             { name: { $regex: regex } },
             { email: { $regex: regex } },
-            { 'subjects': { $regex: regex } } // Search in subjects array
+            { subjects: { $regex: regex } }, // Search in subjects array
           ];
         }
 
         // Fetch tutors with additional tutor-specific fields
-        const tutors = await usersCollection.find(query).project({
-          name: 1,
-          email: 1,
-          image: 1,
-          subjects: 1,
-          bio: 1,
-          education: 1,
-          experience: 1,
-          hourlyRate: 1,
-          rating: 1,
-          reviews: 1,
-          sessions: 1,
-          _id: 1
-        }).toArray();
+        const tutors = await usersCollection
+          .find(query)
+          .project({
+            name: 1,
+            email: 1,
+            image: 1,
+            subjects: 1,
+            bio: 1,
+            education: 1,
+            experience: 1,
+            hourlyRate: 1,
+            rating: 1,
+            reviews: 1,
+            sessions: 1,
+            _id: 1,
+          })
+          .toArray();
 
         // Calculate average rating if not already stored
-        const tutorsWithRating = tutors.map(tutor => {
+        const tutorsWithRating = tutors.map((tutor) => {
           if (!tutor.rating && tutor.reviews?.length > 0) {
-            const avgRating = tutor.reviews.reduce((sum, review) => sum + review.rating, 0) / tutor.reviews.length;
+            const avgRating =
+              tutor.reviews.reduce((sum, review) => sum + review.rating, 0) /
+              tutor.reviews.length;
             return { ...tutor, rating: avgRating.toFixed(1) };
           }
           return tutor;
@@ -961,120 +965,162 @@ async function run() {
 
         res.status(200).json(tutorsWithRating);
       } catch (error) {
-        console.error('Failed to fetch tutors:', error);
-        res.status(500).json({ message: 'Failed to fetch tutors', error: error.message });
+        console.error("Failed to fetch tutors:", error);
+        res
+          .status(500)
+          .json({ message: "Failed to fetch tutors", error: error.message });
       }
     });
 
 
 
+
+
+
+    
 
     // ✅ /sessions/all?search=math&page=1&limit=6
-  // GET /sessions/all with pagination, search, and filtering
-app.get('/sessions/all', async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 0;
-    const limit = parseInt(req.query.limit) || 6;
-    const search = req.query.search || '';
-    const category = req.query.category || '';
-    const status = req.query.status || '';
+    // GET /sessions/all with pagination, search, and filtering
+    // Updated /sessions/all endpoint with better infinite scroll support
+    app.get("/sessions/all", async (req, res) => {
+      try {
+        const page = parseInt(req.query.page) || 0;
+        const limit = parseInt(req.query.limit) || PAGE_SIZE;
+        const search = req.query.search || "";
+        const category = req.query.category || "";
+        const status = req.query.status || "";
 
-    // Validate inputs
-    if (isNaN(page)) throw new Error('Invalid page number');
-    if (isNaN(limit)) throw new Error('Invalid limit value');
+        // Validate inputs
+        if (isNaN(page) || isNaN(limit)) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid page or limit value",
+          });
+        }
 
-    // Build query
-    const query = {};
+        const query = {};
 
-    // Search filter
-    if (search) {
-      query.$or = [
-        { sessionTitle: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { tutorName: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    // Category filter
-    if (category) {
-      query.category = category;
-    }
-
-    // Status filter
-    if (status) {
-      const now = new Date();
-      switch (status) {
-        case 'upcoming':
-          query.registrationStartDate = { $gt: now };
-          break;
-        case 'ongoing':
-          query.$and = [
-            { registrationStartDate: { $lte: now } },
-            { registrationEndDate: { $gte: now } }
+        // Search filter
+        if (search) {
+          query.$or = [
+            { sessionTitle: { $regex: search, $options: "i" } },
+            { description: { $regex: search, $options: "i" } },
+            { tutorName: { $regex: search, $options: "i" } },
           ];
-          break;
-        case 'closed':
-          query.registrationEndDate = { $lt: now };
-          break;
+        }
+
+        // Category filter
+        if (category) {
+          query.category = category;
+        }
+
+        // Status filter (now supports both admin status and date-based status)
+        if (status) {
+          if (["approved", "pending", "rejected"].includes(status)) {
+            // Admin status filter
+            query.status = status;
+          } else {
+            // Date-based status filter
+            const now = new Date();
+            if (status === "upcoming") {
+              query.registrationStartDate = { $gt: now };
+            } else if (status === "ongoing") {
+              query.registrationStartDate = { $lte: now };
+              query.registrationEndDate = { $gte: now };
+            } else if (status === "closed") {
+              query.registrationEndDate = { $lt: now };
+            }
+          }
+        }
+
+        // Count total matching documents
+        const total = await sessionsCollection.countDocuments(query);
+
+        // Get paginated results
+        const sessions = await sessionsCollection
+          .find(query)
+          .sort({ createdAt: -1 })
+          .skip(page * limit)
+          .limit(limit)
+          .toArray();
+
+        // Calculate if there are more pages
+        const hasMore = (page + 1) * limit < total;
+
+        res.status(200).json({
+          success: true,
+          sessions,
+          page,
+          hasMore,
+          total,
+        });
+      } catch (error) {
+        console.error("Error fetching sessions:", error);
+        res.status(500).json({
+          success: false,
+          message: "Failed to fetch sessions",
+          error: error.message,
+        });
       }
-    }
-
-    // Get total count
-    const total = await sessionsCollection.countDocuments(query);
-
-    // Get paginated results with required fields
-    const sessions = await sessionsCollection.find(query, {
-      projection: {
-        _id: 1,
-        sessionTitle: 1,
-        description: 1,
-        image: 1,
-        tutorName: 1,
-        category: 1,
-        registrationStartDate: 1,
-        registrationEndDate: 1,
-        sessionDuration: 1,
-        enrolledStudents: 1
-      }
-    })
-    .sort({ createdAt: -1 })
-    .skip(page * limit)
-    .limit(limit)
-    .toArray();
-
-    // Calculate if more pages exist
-    const hasMore = (page + 1) * limit < total;
-
-    res.status(200).json({
-      success: true,
-      sessions,
-      total,
-      page,
-      hasMore
     });
 
-  } catch (error) {
-    console.error('Error fetching sessions:', error);
-    res.status(500).json({ 
-      success: false,
-      message: 'Failed to fetch sessions',
-      error: error.message 
+
+
+
+
+
+
+
+
+
+
+
+
+    // ***********************admin dashboard**********************
+
+    app.get("/sessions/admin", async (req, res) => {
+      try {
+        // Optional Query Params
+        const search = req.query.search || "";
+        const status = req.query.status || "";
+        const category = req.query.category || "";
+
+        const query = {};
+
+        // Optional Search Filter (title, description, tutorName)
+        if (search) {
+          query.$or = [
+            { sessionTitle: { $regex: search, $options: "i" } },
+            { description: { $regex: search, $options: "i" } },
+            { tutorName: { $regex: search, $options: "i" } },
+          ];
+        }
+
+        // Optional Status Filter (approved, pending, rejected)
+        if (status) {
+          query.status = status;
+        }
+
+        // Optional Category Filter
+        if (category) {
+          query.category = category;
+        }
+
+        const sessions = await sessionsCollection
+          .find(query)
+          .sort({ createdAt: -1 })
+          .toArray();
+
+        res.status(200).json(sessions);
+      } catch (error) {
+        console.error("Error fetching admin sessions:", error);
+        res.status(500).json({
+          success: false,
+          message: "Failed to fetch admin sessions",
+          error: error.message,
+        });
+      }
     });
-  }
-});
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
