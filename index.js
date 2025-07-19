@@ -70,6 +70,29 @@ async function run() {
       res.send({ message: "User created", inserted: true, result });
     });
 
+    
+
+    // ✅ New API: Get full user info by email
+    app.get("/users/:email", async (req, res) => {
+      const email = req.params.email;
+
+      try {
+        const user = await usersCollection.findOne({ email });
+
+        if (!user) {
+          return res.status(404).json({ message: "User not found" });
+        }
+
+        res.status(200).json(user);
+      } catch (error) {
+        console.error("Failed to fetch user by email:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+
+
+
+
     // GET /users?search=keyword
     app.get("/users", async (req, res) => {
       const search = req.query.search;
@@ -972,13 +995,6 @@ async function run() {
       }
     });
 
-
-
-
-
-
-    
-
     // ✅ /sessions/all?search=math&page=1&limit=6
     // GET /sessions/all with pagination, search, and filtering
     // Updated /sessions/all endpoint with better infinite scroll support
@@ -1063,18 +1079,6 @@ async function run() {
         });
       }
     });
-
-
-
-
-
-
-
-
-
-
-
-
 
     // ***********************admin dashboard**********************
 
