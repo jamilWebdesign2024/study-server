@@ -70,48 +70,192 @@ async function run() {
       res.send({ message: "User created", inserted: true, result });
     });
 
-    
 
-    // ✅ New API: Get full user info by email
-    app.get("/users/:email", async (req, res) => {
-      const email = req.params.email;
 
+    //******    Dashboard ******* */
+
+    // toturo dashbord
+    app.get('/dashboard/tutor-overview', async (req, res) => {
       try {
-        const user = await usersCollection.findOne({ email });
-
-        if (!user) {
-          return res.status(404).json({ message: "User not found" });
+        const { email } = req.query;
+        if (!email) {
+          return res.status(400).json({ message: 'Tutor email is required' });
         }
 
-        res.status(200).json(user);
+        // Sessions created by the tutor
+        const sessions = await sessionsCollection.find({ tutorEmail: email }).toArray();
+        const totalSessions = sessions.length;
+
+        // Booked sessions for the tutor
+        const bookedSessions = await bookedSessionCollection.find({ tutorEmail: email }).toArray();
+        const totalBookings = bookedSessions.length;
+
+        // Calculate total revenue
+        const totalRevenue = bookedSessions.reduce((acc, item) => acc + parseFloat(item.registrationFee || 0), 0);
+
+        // Reviews for sessions created by the tutor
+        const sessionIds = sessions.map(session => session._id.toString());
+        const reviews = await reviewsCollection.find({ sessionId: { $in: sessionIds } }).toArray();
+        const totalReviews = reviews.length;
+
+        // Calculate average rating
+        const averageRating = totalReviews > 0
+          ? (reviews.reduce((acc, item) => acc + item.rating, 0) / totalReviews).toFixed(1)
+          : 0;
+
+        // Session booking count by sessionTitle (for chart)
+        const sessionBookingCount = {};
+        bookedSessions.forEach((booking) => {
+          const title = booking.sessionTitle || 'Untitled';
+          sessionBookingCount[title] = (sessionBookingCount[title] || 0) + 1;
+        });
+
+        res.json({
+          totalSessions,
+          totalBookings,
+          totalRevenue,
+          totalReviews,
+          averageRating,
+          sessionBookingCount
+        });
+      } catch (err) {
+        console.error('Error fetching tutor dashboard:', err);
+        res.status(500).json({ message: 'Failed to fetch tutor dashboard' });
+      }
+    });
+
+
+    // admin dashboard
+
+    // Assuming MongoDB native driver and Express.js
+
+    app.get('/dashboard/admin-overview', async (req, res) => {
+      try {
+        const totalUsers = await usersCollection.countDocuments();
+        const totalTutors = await usersCollection.countDocuments({ role: "tutor" });
+        const totalSessions = await sessionsCollection.countDocuments();
+        const totalBookings = await bookedSessionCollection.countDocuments();
+        const totalReviews = await reviewsCollection.countDocuments();
+        const totalNotes = await notesCollection.countDocuments();
+        const totalMaterials = await materialsCollection.countDocuments();
+
+        const totalRevenueAggregation = await bookedSessionCollection.aggregate([
+          { $group: { _id: null, totalRevenue: { $sum: "$registrationFee" } } }
+        ]).toArray();
+
+        const totalRevenue = totalRevenueAggregation[0]?.totalRevenue || 0;
+
+        const averageRatingAggregation = await reviewsCollection.aggregate([
+          { $group: { _id: null, avgRating: { $avg: "$rating" } } }
+        ]).toArray();
+
+        const averageRating = averageRatingAggregation[0]?.avgRating?.toFixed(1) || "0";
+
+        // Aggregate bookings count by sessionTitle
+        const sessionBookingCountArray = await bookedSessionCollection.aggregate([
+          {
+            $group: {
+              _id: "$sessionTitle",
+              count: { $sum: 1 },
+            },
+          },
+        ]).toArray();
+
+        // Convert array to object { sessionTitle: count }
+        const sessionBookingCount = {};
+        sessionBookingCountArray.forEach(({ _id, count }) => {
+          sessionBookingCount[_id] = count;
+        });
+
+        res.json({
+          totalUsers,
+          totalTutors,
+          totalSessions,
+          totalBookings,
+          totalReviews,
+          totalNotes,
+          totalMaterials,
+          totalRevenue,
+          averageRating,
+          sessionBookingCount,  // <--- IMPORTANT, add this
+        });
       } catch (error) {
-        console.error("Failed to fetch user by email:", error);
-        res.status(500).json({ message: "Internal server error" });
+        console.error(error);
+        res.status(500).json({ error: "Server error" });
+      }
+    });
+
+
+
+    //// admin profile
+    app.get('/api/admin/profile', async (req, res) => {
+      try {
+        const email = req.query.email;
+        if (!email) return res.status(400).json({ error: 'Email is required' });
+
+        const user = await usersCollection.findOne({ email, role: 'admin' }, { projection: { password: 0 } });
+        if (!user) return res.status(404).json({ error: 'Admin not found' });
+
+        res.json(user);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Server error' });
+      }
+    });
+
+    // for update admin profile
+    // Expect JSON body: { email, name, photo }
+    // Email required to identify user
+    app.put('/api/admin/profile', async (req, res) => {
+      try {
+        const { email, name, photo } = req.body;
+        if (!email) return res.status(400).json({ error: 'Email is required' });
+
+        const updateDoc = {};
+        if (name) updateDoc.name = name;
+        if (photo) updateDoc.photo = photo;
+
+        const result = await usersCollection.updateOne({ email, role: 'admin' }, { $set: updateDoc });
+        if (result.matchedCount === 0) return res.status(404).json({ error: 'Admin not found' });
+
+        const updatedUser = await usersCollection.findOne({ email }, { projection: { password: 0 } });
+        res.json(updatedUser);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Server error' });
       }
     });
 
 
 
 
-    // GET /users?search=keyword
-    app.get("/users", async (req, res) => {
-      const search = req.query.search;
-      if (!search) {
-        return res.status(400).json({ message: "Search keyword is required" });
-      }
-      const regex = new RegExp(search, "i");
-      const query = search
-        ? {
-            $or: [
-              { name: { $regex: regex, $options: "i" } },
-              { email: { $regex: regex, $options: "i" } },
-            ],
-          }
-        : {};
 
-      const users = await usersCollection.find(query).toArray();
-      res.send(users);
+    // GET /users/tutors - Get all tutors with optional search
+    // Example using Express.js and MongoDB native driver
+
+    app.get("/users/tutors", async (req, res) => {
+      try {
+        const { search } = req.query;
+
+        // Base query: Only tutors
+        let query = { role: "tutor" };
+
+        // If search query provided, match name using case-insensitive regex
+        if (search) {
+          const regex = new RegExp(search, "i");
+          query.name = { $regex: regex };
+        }
+
+        // Fetch from MongoDB
+        const tutors = await usersCollection.find(query).toArray();
+
+        res.status(200).json(tutors); // Send full data array
+      } catch (error) {
+        console.error("Failed to fetch tutors:", error.message);
+        res.status(500).json({ message: "Failed to fetch tutors", error: error.message });
+      }
     });
+
 
     // GET /users/search?keyword=xyz
     app.get("/users/search", async (req, res) => {
@@ -139,11 +283,60 @@ async function run() {
       }
     });
 
+
+
+    // GET /users?search=keyword
+    app.get("/users", async (req, res) => {
+      const search = req.query.search;
+      if (!search) {
+        return res.status(400).json({ message: "Search keyword is required" });
+      }
+      const regex = new RegExp(search, "i");
+      const query = search
+        ? {
+          $or: [
+            { name: { $regex: regex, $options: "i" } },
+            { email: { $regex: regex, $options: "i" } },
+          ],
+        }
+        : {};
+
+      const users = await usersCollection.find(query).toArray();
+      res.send(users);
+    });
+
+    
+
     app.get("/users/role", async (req, res) => {
       const email = req.query.email;
       const result = await usersCollection.findOne({ email });
       res.send(result);
     });
+
+
+
+    // ✅ New API: Get full user info by email
+    app.get("/users/:email", async (req, res) => {
+      const email = req.params.email;
+
+      try {
+        const user = await usersCollection.findOne({ email });
+
+        if (!user) {
+          return res.status(404).json({ message: "User not found" });
+        }
+
+        res.status(200).json(user);
+      } catch (error) {
+        console.error("Failed to fetch user by email:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+
+
+
+
+    
 
     // PATCH /users/role/:id
     app.patch("/users/role/:id", async (req, res) => {
@@ -165,7 +358,7 @@ async function run() {
 
     // to get all session in an array
 
-    app.get("/sessions/all", async (req, res) => {
+    app.get("/sessions/all/admin", async (req, res) => {
       const allSessions = await sessionsCollection.find().toArray();
       res.send(allSessions);
     });
@@ -318,6 +511,95 @@ async function run() {
         return res.status(500).json({ message: "Internal server error" });
       }
     });
+
+    // ✅ /sessions/all?search=math&page=1&limit=6
+    // GET /sessions/all with pagination, search, and filtering
+    // Updated /sessions/all endpoint with better infinite scroll support
+    app.get("/sessions/all", async (req, res) => {
+      try {
+        const page = parseInt(req.query.page) || 1; // Default to page 1
+        const limit = parseInt(req.query.limit) || 10; // Default limit
+        const search = req.query.search || "";
+        const category = req.query.category || "";
+        const status = req.query.status || "";
+
+        console.log("Page:", page, "Limit:", limit);
+
+        if (isNaN(page) || isNaN(limit) || page < 1 || limit < 1) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid page or limit value",
+          });
+        }
+
+        const query = {};
+
+        if (search) {
+          const regex = new RegExp(search, "i");
+          query.$or = [
+            { sessionTitle: { $regex: regex } },
+            { description: { $regex: regex } },
+            { tutorName: { $regex: regex } },
+          ];
+        }
+
+        if (category) {
+          query.category = category;
+        }
+
+        const now = new Date();
+
+        if (status) {
+          if (["approved", "pending", "rejected"].includes(status)) {
+            query.status = status;
+          } else {
+            if (status === "upcoming") {
+              query.registrationStartDate = { $exists: true, $gt: now };
+            } else if (status === "ongoing") {
+              query.registrationStartDate = { $exists: true, $lte: now };
+              query.registrationEndDate = { $exists: true, $gte: now };
+            } else if (status === "closed") {
+              query.registrationEndDate = { $exists: true, $lt: now };
+            }
+          }
+        }
+
+        // check if collection has data
+        const sample = await sessionsCollection.find({}).limit(1).toArray();
+        console.log("Sample session:", sample);
+
+        const total = await sessionsCollection.countDocuments(query);
+        const skip = (page - 1) * limit;
+
+        const sessions = await sessionsCollection
+          .find(query)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .toArray();
+
+        res.status(200).json({
+          success: true,
+          sessions,
+          total,
+          page,
+          pageSize: limit,
+          totalPages: Math.ceil(total / limit),
+          hasMore: skip + sessions.length < total,
+        });
+      } catch (error) {
+        console.error("Error fetching sessions:", error);
+        console.error(error.stack);
+        res.status(500).json({
+          success: false,
+          message: "Failed to fetch sessions",
+          error: error.message,
+        });
+      }
+    });
+
+
+
 
     // Assuming you have already connected to MongoDB and have a sessions collection
     app.get("/sessions/:id", async (req, res) => {
@@ -940,145 +1222,12 @@ async function run() {
 
     // all tutors api*********************************
 
-    // GET /users/tutors - Get all tutors with optional search
-    app.get("/users/tutors", async (req, res) => {
-      try {
-        const { search } = req.query;
-        const query = { role: "tutor" }; // Only fetch users with tutor role
 
-        // Add search functionality if search term exists
-        if (search) {
-          const regex = new RegExp(search, "i");
-          query.$or = [
-            { name: { $regex: regex } },
-            { email: { $regex: regex } },
-            { subjects: { $regex: regex } }, // Search in subjects array
-          ];
-        }
 
-        // Fetch tutors with additional tutor-specific fields
-        const tutors = await usersCollection
-          .find(query)
-          .project({
-            name: 1,
-            email: 1,
-            image: 1,
-            subjects: 1,
-            bio: 1,
-            education: 1,
-            experience: 1,
-            hourlyRate: 1,
-            rating: 1,
-            reviews: 1,
-            sessions: 1,
-            _id: 1,
-          })
-          .toArray();
 
-        // Calculate average rating if not already stored
-        const tutorsWithRating = tutors.map((tutor) => {
-          if (!tutor.rating && tutor.reviews?.length > 0) {
-            const avgRating =
-              tutor.reviews.reduce((sum, review) => sum + review.rating, 0) /
-              tutor.reviews.length;
-            return { ...tutor, rating: avgRating.toFixed(1) };
-          }
-          return tutor;
-        });
 
-        res.status(200).json(tutorsWithRating);
-      } catch (error) {
-        console.error("Failed to fetch tutors:", error);
-        res
-          .status(500)
-          .json({ message: "Failed to fetch tutors", error: error.message });
-      }
-    });
 
-    // ✅ /sessions/all?search=math&page=1&limit=6
-    // GET /sessions/all with pagination, search, and filtering
-    // Updated /sessions/all endpoint with better infinite scroll support
-    app.get("/sessions/all", async (req, res) => {
-      try {
-        const page = parseInt(req.query.page) || 0;
-        const limit = parseInt(req.query.limit) || PAGE_SIZE;
-        const search = req.query.search || "";
-        const category = req.query.category || "";
-        const status = req.query.status || "";
 
-        // Validate inputs
-        if (isNaN(page) || isNaN(limit)) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid page or limit value",
-          });
-        }
-
-        const query = {};
-
-        // Search filter
-        if (search) {
-          query.$or = [
-            { sessionTitle: { $regex: search, $options: "i" } },
-            { description: { $regex: search, $options: "i" } },
-            { tutorName: { $regex: search, $options: "i" } },
-          ];
-        }
-
-        // Category filter
-        if (category) {
-          query.category = category;
-        }
-
-        // Status filter (now supports both admin status and date-based status)
-        if (status) {
-          if (["approved", "pending", "rejected"].includes(status)) {
-            // Admin status filter
-            query.status = status;
-          } else {
-            // Date-based status filter
-            const now = new Date();
-            if (status === "upcoming") {
-              query.registrationStartDate = { $gt: now };
-            } else if (status === "ongoing") {
-              query.registrationStartDate = { $lte: now };
-              query.registrationEndDate = { $gte: now };
-            } else if (status === "closed") {
-              query.registrationEndDate = { $lt: now };
-            }
-          }
-        }
-
-        // Count total matching documents
-        const total = await sessionsCollection.countDocuments(query);
-
-        // Get paginated results
-        const sessions = await sessionsCollection
-          .find(query)
-          .sort({ createdAt: -1 })
-          .skip(page * limit)
-          .limit(limit)
-          .toArray();
-
-        // Calculate if there are more pages
-        const hasMore = (page + 1) * limit < total;
-
-        res.status(200).json({
-          success: true,
-          sessions,
-          page,
-          hasMore,
-          total,
-        });
-      } catch (error) {
-        console.error("Error fetching sessions:", error);
-        res.status(500).json({
-          success: false,
-          message: "Failed to fetch sessions",
-          error: error.message,
-        });
-      }
-    });
 
     // ***********************admin dashboard**********************
 
