@@ -1,17 +1,90 @@
 const express = require("express");
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
+const cookieParser = require("cookie-parser");
 const app = express();
 require("dotenv").config();
-
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: 'https://study-sphere-fb1d4.web.app',
+  credentials: true
+}));
+
 app.use(express.json());
+
+app.use(cookieParser());
+
+
+
+const verifyToken = (req, res, next) => {
+  try {
+    const token = req?.cookies?.token;
+    // console.log('Token in middleware:', token);
+    console.log(token);
+
+    if (!token) {
+      return res.status(401).send({ message: 'Unauthorized Access: No token' });
+    }
+
+    jwt.verify(token, process.env.JWT_ACCESS_SECRET, (err, decoded) => {
+      if (err) {
+        return res.status(403).send({ message: 'Forbidden: Invalid token' });
+      }
+
+      req.decoded = decoded; // e.g., { email, role }
+      // console.log(decoded);
+      next();
+    });
+  } catch (err) {
+    console.error('Token verification error:', err);
+    return res.status(500).send({ message: 'Internal Server Error' });
+  }
+};
+
+
+const verifyRole = (allowedRoles) => {
+  return async (req, res, next) => {
+    try {
+      const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+      const email = req.decoded?.email;
+      console.log(roles);
+
+      if (!email) {
+        return res.status(401).send({ message: 'Unauthorized: Missing email in token' });
+      }
+
+      const db = client.db('studysphere');
+      const usersCollection = db.collection('users');
+
+      const user = await usersCollection.findOne({ email });
+
+      if (!user) {
+        return res.status(404).send({ message: 'User not found' });
+      }
+
+      if (!roles.includes(user.role)) {
+        return res.status(403).send({ message: 'Access Denied: Role restricted' });
+      }
+
+      next();
+    } catch (error) {
+      console.error('Role check error:', error);
+      return res.status(500).send({ message: 'Internal Server Error' });
+    }
+  };
+};
+
+
+
+
 
 // Mongodb process
 
-const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.1gwegko.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -26,7 +99,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
 
     const usersCollection = client.db("studysphere").collection("users");
     const sessionsCollection = client.db("studysphere").collection("sessions");
@@ -54,6 +127,46 @@ async function run() {
         clientSecret: paymentIntent.client_secret,
       });
     });
+
+
+
+
+    //****************************************/
+    //*****    JWT token Related Api     *****/
+    //****************************************/
+    app.post('/jwt', async (req, res) => {
+      const userData = req.body;
+      const token = jwt.sign(userData, process.env.JWT_ACCESS_SECRET, { expiresIn: '1d' })
+
+      res
+        .cookie('token', token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
+        })
+        .send({ success: true })
+
+    })
+
+
+    app.post("/logout", (req, res) => {
+      // res.clearCookie("token");
+      // res.json({ message: "Logged out" });
+      res
+        .clearCookie('token', {
+          maxAge: 0,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
+        })
+        .send({ success: true })
+
+
+    });
+    
+
+
+
+
 
     // step 1: users data receive
     app.post("/users", async (req, res) => {
@@ -187,8 +300,54 @@ async function run() {
 
 
 
+
+    // ✅ BACKEND: Get student dashboard overview
+    // Endpoint: GET /dashboard/student-overview?email=student@gmail.com
+
+    app.get('/dashboard/student-overview', async (req, res) => {
+      try {
+        const studentEmail = req.query.email;
+        if (!studentEmail) return res.status(400).json({ error: 'Student email is required' });
+
+        const [bookedSessions, reviews, notes, materials] = await Promise.all([
+          bookedSessionCollection.find({ studentEmail }).toArray(),
+          reviewsCollection.find({ studentEmail }).toArray(),
+          notesCollection.find({ email: studentEmail }).toArray(),
+          materialsCollection.find({ uploadedBy: studentEmail }).toArray() // optional condition
+        ]);
+
+        // Optional: session titles for bar/pie chart
+        const sessionBookingCount = {};
+        bookedSessions.forEach((session) => {
+          sessionBookingCount[session.sessionTitle] = (sessionBookingCount[session.sessionTitle] || 0) + 1;
+        });
+
+        const totalSpent = bookedSessions.reduce((sum, b) => sum + parseFloat(b.registrationFee || 0), 0);
+
+        const averageRating =
+          reviews.length > 0
+            ? (reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / reviews.length).toFixed(1)
+            : 0;
+
+        res.json({
+          totalBookedSessions: bookedSessions.length,
+          totalReviews: reviews.length,
+          totalNotes: notes.length,
+          totalMaterials: materials.length,
+          totalSpent,
+          averageRating,
+          sessionBookingCount,
+        });
+      } catch (err) {
+        console.error('Student Dashboard Error:', err);
+        res.status(500).json({ error: 'Server Error' });
+      }
+    });
+
+
+
     //// admin profile
-    app.get('/api/admin/profile', async (req, res) => {
+    app.get('/api/admin/profile', verifyToken, verifyRole('admin'), async (req, res) => {
       try {
         const email = req.query.email;
         if (!email) return res.status(400).json({ error: 'Email is required' });
@@ -217,6 +376,88 @@ async function run() {
 
         const result = await usersCollection.updateOne({ email, role: 'admin' }, { $set: updateDoc });
         if (result.matchedCount === 0) return res.status(404).json({ error: 'Admin not found' });
+
+        const updatedUser = await usersCollection.findOne({ email }, { projection: { password: 0 } });
+        res.json(updatedUser);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Server error' });
+      }
+    });
+
+
+
+    //// student profile
+    app.get('/api/student/profile', async (req, res) => {
+      try {
+        const email = req.query.email;
+        if (!email) return res.status(400).json({ error: 'Email is required' });
+
+        const user = await usersCollection.findOne({ email, role: 'student' }, { projection: { password: 0 } });
+        if (!user) return res.status(404).json({ error: 'student not found' });
+
+        res.json(user);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Server error' });
+      }
+    });
+
+    // for update student profile
+    // Expect JSON body: { email, name, photo }
+    // Email required to identify user
+    app.put('/api/student/profile', async (req, res) => {
+      try {
+        const { email, name, photo } = req.body;
+        if (!email) return res.status(400).json({ error: 'Email is required' });
+
+        const updateDoc = {};
+        if (name) updateDoc.name = name;
+        if (photo) updateDoc.photo = photo;
+
+        const result = await usersCollection.updateOne({ email, role: 'student' }, { $set: updateDoc });
+        if (result.matchedCount === 0) return res.status(404).json({ error: 'student not found' });
+
+        const updatedUser = await usersCollection.findOne({ email }, { projection: { password: 0 } });
+        res.json(updatedUser);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Server error' });
+      }
+    });
+
+
+
+    //// tutor profile
+    app.get('/api/tutor/profile', verifyToken, verifyRole('tutor'), async (req, res) => {
+      try {
+        const email = req.query.email;
+        if (!email) return res.status(400).json({ error: 'Email is required' });
+
+        const user = await usersCollection.findOne({ email, role: 'tutor' }, { projection: { password: 0 } });
+        if (!user) return res.status(404).json({ error: 'tutor not found' });
+
+        res.json(user);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Server error' });
+      }
+    });
+
+    // for update student profile
+    // Expect JSON body: { email, name, photo }
+    // Email required to identify user
+    app.put('/api/tutor/profile', async (req, res) => {
+      try {
+        const { email, name, photo } = req.body;
+        if (!email) return res.status(400).json({ error: 'Email is required' });
+
+        const updateDoc = {};
+        if (name) updateDoc.name = name;
+        if (photo) updateDoc.photo = photo;
+
+        const result = await usersCollection.updateOne({ email, role: 'tutor' }, { $set: updateDoc });
+        if (result.matchedCount === 0) return res.status(404).json({ error: 'tutor not found' });
 
         const updatedUser = await usersCollection.findOne({ email }, { projection: { password: 0 } });
         res.json(updatedUser);
@@ -305,7 +546,7 @@ async function run() {
       res.send(users);
     });
 
-    
+
 
     app.get("/users/role", async (req, res) => {
       const email = req.query.email;
@@ -336,7 +577,7 @@ async function run() {
 
 
 
-    
+
 
     // PATCH /users/role/:id
     app.patch("/users/role/:id", async (req, res) => {
@@ -1275,11 +1516,75 @@ async function run() {
       }
     });
 
+
+
+
+
+    // ✅ BACKEND: Get student dashboard overview
+    // Endpoint: GET /dashboard/student-overview?email=student@gmail.com
+
+    app.get('/dashboard/student-overview', async (req, res) => {
+      try {
+        const studentEmail = req.query.email;
+        if (!studentEmail) return res.status(400).json({ error: 'Student email is required' });
+
+        const [bookedSessions, reviews, notes, materials] = await Promise.all([
+          bookedSessionCollection.find({ studentEmail }).toArray(),
+          reviewsCollection.find({ studentEmail }).toArray(),
+          notesCollection.find({ email: studentEmail }).toArray(),
+          materialsCollection.find({ uploadedBy: studentEmail }).toArray() // optional condition
+        ]);
+
+        // Optional: session titles for bar/pie chart
+        const sessionBookingCount = {};
+        bookedSessions.forEach((session) => {
+          sessionBookingCount[session.sessionTitle] = (sessionBookingCount[session.sessionTitle] || 0) + 1;
+        });
+
+        const totalSpent = bookedSessions.reduce((sum, b) => sum + parseFloat(b.registrationFee || 0), 0);
+
+        const averageRating =
+          reviews.length > 0
+            ? (reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / reviews.length).toFixed(1)
+            : 0;
+
+        res.json({
+          totalBookedSessions: bookedSessions.length,
+          totalReviews: reviews.length,
+          totalNotes: notes.length,
+          totalMaterials: materials.length,
+          totalSpent,
+          averageRating,
+          sessionBookingCount,
+        });
+      } catch (err) {
+        console.error('Student Dashboard Error:', err);
+        res.status(500).json({ error: 'Server Error' });
+      }
+    });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+    // // await client.db("admin").command({ ping: 1 });
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!"
+    // );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
@@ -1293,7 +1598,7 @@ app.get("/", (req, res) => {
 });
 
 // start the server
-const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
   console.log(`Server is running on Port ${PORT}`);
 });
