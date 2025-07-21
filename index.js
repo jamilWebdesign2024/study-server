@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors({
-  origin: 'http://localhost:5174',
+  origin: 'http://localhost:5173',
   credentials: true
 }));
 
@@ -112,6 +112,8 @@ async function run() {
       .db("studysphere")
       .collection("materials");
 
+
+
     // Stripe post for intent
     // for payment confirmation from stripe
     app.post("/create-payment-intent", async (req, res) => {
@@ -188,7 +190,7 @@ async function run() {
     //******    Dashboard ******* */
 
     // toturo dashbord
-    app.get('/dashboard/tutor-overview', async (req, res) => {
+    app.get('/dashboard/tutor-overview', verifyToken, verifyRole('tutor'), async (req, res) => {
       try {
         const { email } = req.query;
         if (!email) {
@@ -242,7 +244,7 @@ async function run() {
 
     // Assuming MongoDB native driver and Express.js
 
-    app.get('/dashboard/admin-overview', async (req, res) => {
+    app.get('/dashboard/admin-overview', verifyToken, verifyRole('admin'), async (req, res) => {
       try {
         const totalUsers = await usersCollection.countDocuments();
         const totalTutors = await usersCollection.countDocuments({ role: "tutor" });
@@ -304,7 +306,7 @@ async function run() {
     // ✅ BACKEND: Get student dashboard overview
     // Endpoint: GET /dashboard/student-overview?email=student@gmail.com
 
-    app.get('/dashboard/student-overview', async (req, res) => {
+    app.get('/dashboard/student-overview', verifyToken, verifyRole('student'), async (req, res) => {
       try {
         const studentEmail = req.query.email;
         if (!studentEmail) return res.status(400).json({ error: 'Student email is required' });
@@ -365,7 +367,7 @@ async function run() {
     // for update admin profile
     // Expect JSON body: { email, name, photo }
     // Email required to identify user
-    app.put('/api/admin/profile', async (req, res) => {
+    app.put('/api/admin/profile', verifyToken, verifyRole('admin'), async (req, res) => {
       try {
         const { email, name, photo } = req.body;
         if (!email) return res.status(400).json({ error: 'Email is required' });
@@ -388,7 +390,7 @@ async function run() {
 
 
     //// student profile
-    app.get('/api/student/profile', async (req, res) => {
+    app.get('/api/student/profile', verifyToken, verifyRole('student'), async (req, res) => {
       try {
         const email = req.query.email;
         if (!email) return res.status(400).json({ error: 'Email is required' });
@@ -406,7 +408,7 @@ async function run() {
     // for update student profile
     // Expect JSON body: { email, name, photo }
     // Email required to identify user
-    app.put('/api/student/profile', async (req, res) => {
+    app.put('/api/student/profile', verifyToken, verifyRole('student'), async (req, res) => {
       try {
         const { email, name, photo } = req.body;
         if (!email) return res.status(400).json({ error: 'Email is required' });
@@ -447,7 +449,7 @@ async function run() {
     // for update student profile
     // Expect JSON body: { email, name, photo }
     // Email required to identify user
-    app.put('/api/tutor/profile', async (req, res) => {
+    app.put('/api/tutor/profile', verifyToken, verifyRole('tutor'), async (req, res) => {
       try {
         const { email, name, photo } = req.body;
         if (!email) return res.status(400).json({ error: 'Email is required' });
@@ -498,8 +500,10 @@ async function run() {
     });
 
 
+
+
     // GET /users/search?keyword=xyz
-    app.get("/users/search", async (req, res) => {
+    app.get("/users/search", verifyToken, verifyRole('admin'), async (req, res) => {
       try {
         const keyword = req.query.keyword?.trim();
 
@@ -527,7 +531,7 @@ async function run() {
 
 
     // GET /users?search=keyword
-    app.get("/users", async (req, res) => {
+    app.get("/users", verifyToken, verifyRole('admin'), async (req, res) => {
       const search = req.query.search;
       if (!search) {
         return res.status(400).json({ message: "Search keyword is required" });
