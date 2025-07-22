@@ -552,7 +552,7 @@ async function run() {
 
 
 
-    app.get("/users/role", async (req, res) => {
+    app.get("/users/role", verifyToken, async (req, res) => {
       const email = req.query.email;
       const result = await usersCollection.findOne({ email });
       res.send(result);
@@ -561,7 +561,7 @@ async function run() {
 
 
     // ✅ New API: Get full user info by email
-    app.get("/users/:email", async (req, res) => {
+    app.get("/users/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
 
       try {
@@ -603,7 +603,7 @@ async function run() {
 
     // to get all session in an array
 
-   app.get('/sessions/all/admin', async (req, res) => {
+   app.get('/sessions/all/admin', verifyToken, verifyRole('admin'), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;      // default page = 1
     const limit = parseInt(req.query.limit) || 5;    // default limit = 5
@@ -639,7 +639,7 @@ async function run() {
     
 
     // GET /sessions?tutorEmail=example@example.com
-    app.get("/sessions", async (req, res) => {
+    app.get("/sessions", verifyToken, verifyRole('tutor'), async (req, res) => {
       try {
         const { tutorEmail } = req.query;
 
@@ -761,6 +761,8 @@ async function run() {
       });
       res.send(result);
     });
+
+
 
     // Create Study Seccion for Tutor
     app.post("/sessions", async (req, res) => {
@@ -1002,7 +1004,7 @@ async function run() {
     });
 
     // to get bookedSession by user email
-    app.get("/bookedSession/user", async (req, res) => {
+    app.get("/bookedSession/user", verifyToken, verifyRole('student'), async (req, res) => {
       try {
         const { email } = req.query;
 
@@ -1059,6 +1061,8 @@ async function run() {
         res.status(500).json({ message: "Internal server error" });
       }
     });
+
+
 
     // Example Express route
     app.get("/bookedSessions/check", async (req, res) => {
@@ -1117,7 +1121,7 @@ async function run() {
     });
 
     // GET /notes - Get all notes for a user with search functionality
-    app.get("/notes", async (req, res) => {
+    app.get("/notes", verifyToken, verifyRole('student'), async (req, res) => {
       try {
         const { email, search } = req.query;
 
@@ -1157,7 +1161,7 @@ async function run() {
     });
 
     // GET /notes/:id - Get single note by ID
-    app.get("/notes/:id", async (req, res) => {
+    app.get("/notes/:id", verifyToken, verifyRole('student'), async (req, res) => {
       try {
         const { id } = req.params;
 
@@ -1325,7 +1329,7 @@ async function run() {
     });
 
     // GET materials for a tutor
-    app.get("/materials", async (req, res) => {
+    app.get("/materials", verifyToken, verifyRole('tutor'), async (req, res) => {
       try {
         const { tutorEmail } = req.query;
         if (!tutorEmail) {
@@ -1413,7 +1417,7 @@ async function run() {
 
     // Optional: Specific API only for students
     // FIXED ✅✅✅
-    app.get("/student/materials", async (req, res) => {
+    app.get("/student/materials", verifyToken, async (req, res) => {
       try {
         const { sessionId } = req.query;
 
