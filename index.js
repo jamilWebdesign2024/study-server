@@ -603,10 +603,40 @@ async function run() {
 
     // to get all session in an array
 
-    app.get("/sessions/all/admin", async (req, res) => {
-      const allSessions = await sessionsCollection.find().toArray();
-      res.send(allSessions);
+   app.get('/sessions/all/admin', async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;      // default page = 1
+    const limit = parseInt(req.query.limit) || 5;    // default limit = 5
+    const skip = (page - 1) * limit;
+
+    // Filter out rejected sessions (যেমন তুমি চেয়েছো)
+    const filter = { status: { $ne: 'rejected' } };
+
+    // মোট ডকুমেন্ট কাউন্ট (non-rejected)
+    const totalCount = await sessionsCollection.countDocuments(filter);
+
+    // পেজ অনুযায়ী ডাটা নিয়ে আসা (Cursor থেকে Array তে রূপান্তর)
+    const sessions = await sessionsCollection.find(filter)
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 }) // নতুন থেকে পুরানো সাজাতে
+      .toArray();              // <<< এটা লাগবে
+
+    res.json({
+      sessions,
+      totalCount,
+      currentPage: page,
+      totalPages: Math.ceil(totalCount / limit),
     });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server Error' });
+  }
+});
+
+
+
+    
 
     // GET /sessions?tutorEmail=example@example.com
     app.get("/sessions", async (req, res) => {
