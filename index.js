@@ -609,18 +609,18 @@ async function run() {
     const limit = parseInt(req.query.limit) || 5;    // default limit = 5
     const skip = (page - 1) * limit;
 
-    // Filter out rejected sessions (যেমন তুমি চেয়েছো)
+    // Filter out rejected sessions 
     const filter = { status: { $ne: 'rejected' } };
 
-    // মোট ডকুমেন্ট কাউন্ট (non-rejected)
+  //  (non-rejected)
     const totalCount = await sessionsCollection.countDocuments(filter);
 
-    // পেজ অনুযায়ী ডাটা নিয়ে আসা (Cursor থেকে Array তে রূপান্তর)
+    
     const sessions = await sessionsCollection.find(filter)
       .skip(skip)
       .limit(limit)
-      .sort({ createdAt: -1 }) // নতুন থেকে পুরানো সাজাতে
-      .toArray();              // <<< এটা লাগবে
+      .sort({ createdAt: -1 }) 
+      .toArray();              
 
     res.json({
       sessions,
@@ -1417,7 +1417,7 @@ async function run() {
 
     // Optional: Specific API only for students
     // FIXED ✅✅✅
-    app.get("/student/materials", verifyToken, async (req, res) => {
+    app.get("/student/materials", verifyToken, verifyRole('student'), async (req, res) => {
       try {
         const { sessionId } = req.query;
 
@@ -1438,7 +1438,7 @@ async function run() {
     });
 
     // ✅ Booked sessions for a student by email
-    app.get("/bookedSession/user", async (req, res) => {
+    app.get("/bookedSession/user",  async (req, res) => {
       try {
         const { email } = req.query;
 
@@ -1448,7 +1448,7 @@ async function run() {
 
         const bookings = await bookedSessionCollection
           .find({ studentEmail: email })
-          .sort({ bookedAt: -1 }) // সর্বশেষ বুকিং আগে দেখাবে
+          .sort({ bookedAt: -1 }) 
           .toArray();
 
         res.status(200).json(bookings);
@@ -1459,7 +1459,7 @@ async function run() {
     });
 
     // ✅ Admin: Get all materials without filtering by tutorEmail
-    app.get("/admin/materials", async (req, res) => {
+    app.get("/admin/materials", verifyToken, verifyRole('admin'), async (req, res) => {
       try {
         const materials = await materialsCollection
           .find({})
@@ -1508,7 +1508,7 @@ async function run() {
 
 
 
-    // ***********************admin dashboard**********************
+    // // ***********************admin dashboard**********************
 
     app.get("/sessions/admin", async (req, res) => {
       try {
@@ -1561,7 +1561,7 @@ async function run() {
     // ✅ BACKEND: Get student dashboard overview
     // Endpoint: GET /dashboard/student-overview?email=student@gmail.com
 
-    app.get('/dashboard/student-overview', async (req, res) => {
+    app.get('/dashboard/student-overview', verifyToken, verifyRole('student'), async (req, res) => {
       try {
         const studentEmail = req.query.email;
         if (!studentEmail) return res.status(400).json({ error: 'Student email is required' });
