@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: ['https://studys-phere-server.vercel.app', 'http://localhost:5173'],
   credentials: true
 }));
 
@@ -99,7 +99,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
 
     const usersCollection = client.db("studysphere").collection("users");
     const sessionsCollection = client.db("studysphere").collection("sessions");
@@ -1508,55 +1508,7 @@ async function run() {
 
 
 
-    // // ***********************admin dashboard**********************
-
-    app.get("/sessions/admin", async (req, res) => {
-      try {
-        // Optional Query Params
-        const search = req.query.search || "";
-        const status = req.query.status || "";
-        const category = req.query.category || "";
-
-        const query = {};
-
-        // Optional Search Filter (title, description, tutorName)
-        if (search) {
-          query.$or = [
-            { sessionTitle: { $regex: search, $options: "i" } },
-            { description: { $regex: search, $options: "i" } },
-            { tutorName: { $regex: search, $options: "i" } },
-          ];
-        }
-
-        // Optional Status Filter (approved, pending, rejected)
-        if (status) {
-          query.status = status;
-        }
-
-        // Optional Category Filter
-        if (category) {
-          query.category = category;
-        }
-
-        const sessions = await sessionsCollection
-          .find(query)
-          .sort({ createdAt: -1 })
-          .toArray();
-
-        res.status(200).json(sessions);
-      } catch (error) {
-        console.error("Error fetching admin sessions:", error);
-        res.status(500).json({
-          success: false,
-          message: "Failed to fetch admin sessions",
-          error: error.message,
-        });
-      }
-    });
-
-
-
-
+    // // // ***********************admin dashboard**********************
 
     // ✅ BACKEND: Get student dashboard overview
     // Endpoint: GET /dashboard/student-overview?email=student@gmail.com
@@ -1620,9 +1572,9 @@ async function run() {
 
     // Send a ping to confirm a successful connection
     // // await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!"
+    // );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
