@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors({
-  origin: 'https://study-sphere-fb1d4.web.app',
+  origin: 'http://localhost:5173',
   credentials: true
 }));
 
@@ -99,7 +99,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    // await client.connect();
+    await client.connect();
 
     const usersCollection = client.db("studysphere").collection("users");
     const sessionsCollection = client.db("studysphere").collection("sessions");
@@ -164,7 +164,7 @@ async function run() {
 
 
     });
-    
+
 
 
 
@@ -603,40 +603,40 @@ async function run() {
 
     // to get all session in an array
 
-   app.get('/sessions/all/admin', verifyToken, verifyRole('admin'), async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;      // default page = 1
-    const limit = parseInt(req.query.limit) || 5;    // default limit = 5
-    const skip = (page - 1) * limit;
+    app.get('/sessions/all/admin', verifyToken, verifyRole('admin'), async (req, res) => {
+      try {
+        const page = parseInt(req.query.page) || 1;      // default page = 1
+        const limit = parseInt(req.query.limit) || 5;    // default limit = 5
+        const skip = (page - 1) * limit;
 
-    // Filter out rejected sessions 
-    const filter = { status: { $ne: 'rejected' } };
+        // Filter out rejected sessions 
+        const filter = { status: { $ne: 'rejected' } };
 
-  //  (non-rejected)
-    const totalCount = await sessionsCollection.countDocuments(filter);
+        //  (non-rejected)
+        const totalCount = await sessionsCollection.countDocuments(filter);
 
-    
-    const sessions = await sessionsCollection.find(filter)
-      .skip(skip)
-      .limit(limit)
-      .sort({ createdAt: -1 }) 
-      .toArray();              
 
-    res.json({
-      sessions,
-      totalCount,
-      currentPage: page,
-      totalPages: Math.ceil(totalCount / limit),
+        const sessions = await sessionsCollection.find(filter)
+          .skip(skip)
+          .limit(limit)
+          .sort({ createdAt: -1 })
+          .toArray();
+
+        res.json({
+          sessions,
+          totalCount,
+          currentPage: page,
+          totalPages: Math.ceil(totalCount / limit),
+        });
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server Error' });
+      }
     });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server Error' });
-  }
-});
 
 
 
-    
+
 
     // GET /sessions?tutorEmail=example@example.com
     app.get("/sessions", verifyToken, verifyRole('tutor'), async (req, res) => {
@@ -1438,7 +1438,7 @@ async function run() {
     });
 
     // ✅ Booked sessions for a student by email
-    app.get("/bookedSession/user",  async (req, res) => {
+    app.get("/bookedSession/user", async (req, res) => {
       try {
         const { email } = req.query;
 
@@ -1448,7 +1448,7 @@ async function run() {
 
         const bookings = await bookedSessionCollection
           .find({ studentEmail: email })
-          .sort({ bookedAt: -1 }) 
+          .sort({ bookedAt: -1 })
           .toArray();
 
         res.status(200).json(bookings);
@@ -1571,10 +1571,10 @@ async function run() {
 
 
     // Send a ping to confirm a successful connection
-    // // await client.db("admin").command({ ping: 1 });
-    // console.log(
-    //   "Pinged your deployment. You successfully connected to MongoDB!"
-    // );
+    await client.db("admin").command({ ping: 1 });
+    console.log(
+      "Pinged your deployment. You successfully connected to MongoDB!"
+    );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
@@ -1592,3 +1592,7 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server is running on Port ${PORT}`);
 });
+
+
+
+// https://study-sphere-fb1d4.web.app
